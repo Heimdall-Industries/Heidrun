@@ -269,7 +269,6 @@ main()
             : maximumIntervalTime
           : minimumIntervalTime;
 
-      console.log(intervalTime);
       process.stdout.write(
         "\nRepeating process every " + intervalTime / 60000 + " minute(s).\n\n"
       );
