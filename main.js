@@ -259,7 +259,7 @@ process.stdout.write(
 
 main()
   .then(() => {
-    if (!args.noRunningProcess) {
+    if (args.noRunningProcess !== 'true') {
       const minimumIntervalTime = 600000;
       const maximumIntervalTime = 6000000;
       const intervalTime =
