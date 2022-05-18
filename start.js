@@ -5,17 +5,10 @@ const args = require("minimist")(
   process.argv.filter((val) => val.includes("="))
 );
 
-const { printPercent, printCheckTime, printLine} = require("./lib/write");
+const Write = require("./lib/write");
 const Web3 = require("./lib/web3");
-const {
-  connection,
-  resourceAddresses,
-  scoreProgramId,
-  keypair,
-  nftNames,
-  tokenProgramId,
-} = Web3;
-
+const { connection, resourceAddresses, scoreProgramId, keypair, nftNames } =
+  Web3;
 
 const userPublicKey = keypair.publicKey;
 
@@ -51,7 +44,7 @@ const getTxInstruction = async (type, shipInfo, fleet) => {
     shipInfo.foodMaxReserve * fleet.shipQuantityInEscrow,
     fleet.shipMint,
     new web3.PublicKey(resourceAddresses[type]),
-      Web3.getTokenPublicKey(resourceAddresses[type]),
+    Web3.getTokenPublicKey(resourceAddresses[type]),
     scoreProgramId
   );
 };
@@ -80,22 +73,17 @@ function calculatePercentLeft(
 let runningProcess;
 async function start() {
   const triggerPercentage = 1;
-  printCheckTime();
+  Write.printCheckTime();
   const nowSec = new Date().getTime() / 1000;
-
   await Web3.refreshAccountInfo();
 
-  printLine("\n  Loading fleet.");
   let userFleets;
   await atlas
     .getAllFleetsForUserPublicKey(connection, userPublicKey, scoreProgramId)
     .then(
-      (fleet) => {
-        userFleets = fleet;
-        process.stdout.write("\033[92m  Success. \033[0m");
-      },
+      (fleet) => userFleets = fleet,
       () => {
-        process.stdout.write("\03391m  Error. \033[0m");
+        Write.printLine({ text: "Error.", color: Write.colors.fgRed });
         exitProcess();
       }
     );
@@ -104,9 +92,9 @@ async function start() {
   for (const fleet of userFleets) {
     let needTransaction = false;
 
-    process.stdout.write(
-      `\n ${nftNames[fleet.shipMint]} (${fleet.shipQuantityInEscrow}) \n`
-    );
+    Write.printLine({
+      text: `\n ${nftNames[fleet.shipMint]} (${fleet.shipQuantityInEscrow})`,
+    });
     let shipInfo = await atlas.getScoreVarsShipInfo(
       connection,
       scoreProgramId,
@@ -120,7 +108,7 @@ async function start() {
       shipInfo.toolkitMaxReserve,
       nowSec
     );
-    printPercent(healthPercent, "HEALTH");
+    Write.printPercent(healthPercent, "HEALTH");
     if (healthPercent <= triggerPercentage) needTransaction = true;
 
     const fuelPercent = calculatePercentLeft(
@@ -130,7 +118,7 @@ async function start() {
       shipInfo.fuelMaxReserve,
       nowSec
     );
-    printPercent(fuelPercent, "FUEL");
+    Write.printPercent(fuelPercent, "FUEL");
     if (fuelPercent <= triggerPercentage) needTransaction = true;
 
     const foodPercent = calculatePercentLeft(
@@ -140,7 +128,7 @@ async function start() {
       shipInfo.foodMaxReserve,
       nowSec
     );
-    printPercent(foodPercent, "FOOD");
+    Write.printPercent(foodPercent, "FOOD");
     if (foodPercent <= triggerPercentage) needTransaction = true;
 
     const armsPercent = calculatePercentLeft(
@@ -150,7 +138,7 @@ async function start() {
       shipInfo.armsMaxReserve,
       nowSec
     );
-    printPercent(armsPercent, "ARMS");
+    Write.printPercent(armsPercent, "ARMS");
     if (armsPercent <= triggerPercentage) needTransaction = true;
 
     if (needTransaction) {
@@ -163,9 +151,9 @@ async function start() {
 
   if (transactionFleet.length > 0) {
     for (const { fleet, shipInfo } of transactionFleet) {
-      process.stdout.write(
-        `\n ### Refilling ${nftNames[fleet.shipMint]} ###\n`
-      );
+      Write.printLine({
+        text: `\n ### Refilling ${nftNames[fleet.shipMint]} ###`,
+      });
 
       const txInstructions = [];
       for (const resource of Object.keys(resourceAddresses)) {
@@ -173,20 +161,21 @@ async function start() {
       }
 
       await sendTransactions(txInstructions).then(async () => {
-        process.stdout.write("\n  Resources refilled successfully\n");
+        Write.printLine({ text: "\n  Resources refilled successfully" });
       });
     }
   } else {
-    process.stdout.write("\n  No need to refill fleet.\n");
+    Write.printLine({ text: "\n  No need to refill fleet." });
   }
 }
 
 const exitProcess = () => {
-  process.stdout.write("\n\033[91m Button 'q' pressed\033[0m\n");
-  process.stdout.write("Stopping STAR ATLAS AUTOMATION.\n");
+  Write.printLine({ text: "\n Button 'q' pressed", color: Write.colors.fgYellow });
+  Write.printLine({ text: "Stopping STAR ATLAS AUTOMATION.", color: Write.colors.fgYellow });
   clearInterval(runningProcess);
   process.exit(0);
 };
+
 readlineModule.emitKeypressEvents(process.stdin);
 process.stdin.setRawMode(true);
 process.stdin.on("keypress", (character) => {
@@ -196,9 +185,10 @@ process.stdin.on("keypress", (character) => {
   return false;
 });
 
-process.stdout.write(
-  "Starting STAR ATLAS AUTOMATION \033[91m(press q to quit)\033[0m\n"
-);
+Write.printLine([
+  { text: "Starting STAR ATLAS AUTOMATION", color: Write.colors.fgYellow },
+  { text: "(press q to quit)", color: Write.colors.fgRed },
+]);
 
 start()
   .then(() => {
@@ -212,9 +202,12 @@ start()
             : maximumIntervalTime
           : minimumIntervalTime;
 
-      process.stdout.write(
-        "\nRepeating process every " + intervalTime / 60000 + " minute(s).\n\n"
-      );
+      Write.printLine({
+        text:
+          "Repeating process every " +
+          intervalTime / 60000 +
+          " minute(s).\n", color: Write.colors.fgYellow
+      });
 
       runningProcess = setInterval(start, intervalTime);
     } else {
