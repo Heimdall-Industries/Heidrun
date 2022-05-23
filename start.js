@@ -54,34 +54,62 @@ async function sendTransactions(txInstruction) {
   return await connection.sendTransaction(tx, [keypair]);
 }
 
-function calculatePercentLeft(
-  fleetResourceBurnOutTime,
-  shipTimeToBurnOneResource,
-  currentCapacityTimestamp,
-  shipResourceMaxReserve,
-  currentTimeSec
-) {
-  const fleetResourceCapacity =
-    fleetResourceBurnOutTime / (shipTimeToBurnOneResource / 1000);
-  const resourcesLeft =
-    fleetResourceCapacity -
-    (currentTimeSec - currentCapacityTimestamp) /
-      (shipTimeToBurnOneResource / 1000);
-  return resourcesLeft / (shipResourceMaxReserve / 100).toFixed(1);
-}
+const calculatePercentLeft = (
+    maxReserve,
+    millisecondsToBurnOne,
+    shipQuantityInEscrow,
+    currentCapacityTimestamp,
+    now,
+    type
+) => {
+  // console.log(type);
+  const totalMax = maxReserve * shipQuantityInEscrow;
+  // console.log('totalMax', totalMax)
+  const totalConsumed =
+      (((now - currentCapacityTimestamp) * 1000) / millisecondsToBurnOne) *
+      shipQuantityInEscrow;
+  // console.log('totalConsumed', totalConsumed)
+  console.log('1 left: ', (100 / totalMax) * (totalMax - totalConsumed))
+  return (100 / totalMax) * (totalMax - totalConsumed);
+};
+
+const calculatePercentLeft2 = (
+    maxReserve,
+    millisecondsToBurnOne,
+    shipQuantityInEscrow,
+    currentTimeUntilEmpty,
+    lastUpdateTimestamp,
+    nowTimestamp,
+    type
+) => {
+  const totalMax = maxReserve * shipQuantityInEscrow;
+  const difference = nowTimestamp - lastUpdateTimestamp;
+  const totalLeft = ((currentTimeUntilEmpty - difference) * 1000) / millisecondsToBurnOne *
+      shipQuantityInEscrow;
+  const totalConsumed =
+      (((nowTimestamp - currentTimeUntilEmpty) * 1000) / millisecondsToBurnOne) *
+      shipQuantityInEscrow;
+  console.log('2 left: ', (100 / totalMax) * totalLeft)
+  return (100 / totalMax) * (totalMax - totalConsumed);
+};
 
 let runningProcess;
 async function start() {
+  // console.clear();
+  Write.printLine([
+    { text: "STAR ATLAS AUTOMATION", color: Write.colors.fgYellow },
+    { text: " (press q to quit)", color: Write.colors.fgRed },
+  ]);
   const triggerPercentage = 1;
   Write.printCheckTime();
   const nowSec = new Date().getTime() / 1000;
   await Web3.refreshAccountInfo();
 
-  let userFleets;
+  let activeFleets;
   await atlas
     .getAllFleetsForUserPublicKey(connection, userPublicKey, scoreProgramId)
     .then(
-      (fleet) => userFleets = fleet,
+      (fleet) => (activeFleets = fleet),
       () => {
         Write.printLine({ text: "Error.", color: Write.colors.fgRed });
         exitProcess();
@@ -89,54 +117,100 @@ async function start() {
     );
 
   const transactionFleet = [];
-  for (const fleet of userFleets) {
+  for (const fleet of activeFleets) {
     let needTransaction = false;
 
     Write.printLine({
-      text: `\n ${nftNames[fleet.shipMint]} (${fleet.shipQuantityInEscrow})`,
+      text: `\n------------------------`,
+    });
+    Write.printLine({
+      text: `| ${nftNames[fleet.shipMint]} (${fleet.shipQuantityInEscrow}) |`,
+    });
+    console.log(new Date(fleet.currentCapacityTimestamp * 1000))
+    Write.printLine({
+      text: `------------------------`,
     });
     let shipInfo = await atlas.getScoreVarsShipInfo(
       connection,
       scoreProgramId,
       fleet.shipMint
     );
-
     const healthPercent = calculatePercentLeft(
-      fleet.healthCurrentCapacity,
-      shipInfo.millisecondsToBurnOneToolkit,
-      fleet.currentCapacityTimestamp,
-      shipInfo.toolkitMaxReserve,
-      nowSec
+        shipInfo.toolkitMaxReserve,
+        shipInfo.millisecondsToBurnOneToolkit,
+        fleet.shipQuantityInEscrow,
+        fleet.repairedAtTimestamp,
+        nowSec,
+        'health'
+    );
+    const healthPercent2 = calculatePercentLeft2(
+        shipInfo.toolkitMaxReserve,
+        shipInfo.millisecondsToBurnOneToolkit,
+        fleet.shipQuantityInEscrow,
+        fleet.healthCurrentCapacity,
+        fleet.repairedAtTimestamp,
+        nowSec,
+        'health'
     );
     Write.printPercent(healthPercent, "HEALTH");
     if (healthPercent <= triggerPercentage) needTransaction = true;
 
     const fuelPercent = calculatePercentLeft(
-      fleet.fuelCurrentCapacity,
-      shipInfo.millisecondsToBurnOneFuel,
-      fleet.currentCapacityTimestamp,
       shipInfo.fuelMaxReserve,
-      nowSec
+      shipInfo.millisecondsToBurnOneFuel,
+      fleet.shipQuantityInEscrow,
+      fleet.fueledAtTimestamp,
+      nowSec,
+        'fuel'
+    );
+    const fuelPercent2 = calculatePercentLeft2(
+        shipInfo.fuelMaxReserve,
+        shipInfo.millisecondsToBurnOneFuel,
+        fleet.shipQuantityInEscrow,
+        fleet.fuelCurrentCapacity,
+        fleet.fueledAtTimestamp,
+        nowSec,
+        'fuel'
     );
     Write.printPercent(fuelPercent, "FUEL");
     if (fuelPercent <= triggerPercentage) needTransaction = true;
 
     const foodPercent = calculatePercentLeft(
-      fleet.foodCurrentCapacity,
-      shipInfo.millisecondsToBurnOneFood,
-      fleet.currentCapacityTimestamp,
-      shipInfo.foodMaxReserve,
-      nowSec
+        shipInfo.foodMaxReserve,
+        shipInfo.millisecondsToBurnOneFood,
+        fleet.shipQuantityInEscrow,
+        fleet.fedAtTimestamp,
+        nowSec,
+        'food'
+    );
+    const foodPercent2 = calculatePercentLeft2(
+        shipInfo.foodMaxReserve,
+        shipInfo.millisecondsToBurnOneFood,
+        fleet.shipQuantityInEscrow,
+        fleet.foodCurrentCapacity,
+        fleet.fedAtTimestamp,
+        nowSec,
+        'food'
     );
     Write.printPercent(foodPercent, "FOOD");
     if (foodPercent <= triggerPercentage) needTransaction = true;
 
     const armsPercent = calculatePercentLeft(
-      fleet.armsCurrentCapacity,
-      shipInfo.millisecondsToBurnOneArms,
-      fleet.currentCapacityTimestamp,
-      shipInfo.armsMaxReserve,
-      nowSec
+        shipInfo.armsMaxReserve,
+        shipInfo.millisecondsToBurnOneArms,
+        fleet.shipQuantityInEscrow,
+        fleet.armedAtTimestamp,
+        nowSec,
+        'arms'
+    );
+    const armsPercent2 = calculatePercentLeft2(
+        shipInfo.armsMaxReserve,
+        shipInfo.millisecondsToBurnOneArms,
+        fleet.shipQuantityInEscrow,
+        fleet.armsCurrentCapacity,
+        fleet.armedAtTimestamp,
+        nowSec,
+        'arms'
     );
     Write.printPercent(armsPercent, "ARMS");
     if (armsPercent <= triggerPercentage) needTransaction = true;
@@ -147,6 +221,10 @@ async function start() {
         shipInfo: shipInfo,
       });
     }
+
+    Write.printLine({
+      text: `------------------------`,
+    });
   }
 
   if (transactionFleet.length > 0) {
@@ -170,8 +248,14 @@ async function start() {
 }
 
 const exitProcess = () => {
-  Write.printLine({ text: "\n Button 'q' pressed", color: Write.colors.fgYellow });
-  Write.printLine({ text: "Stopping STAR ATLAS AUTOMATION.", color: Write.colors.fgYellow });
+  Write.printLine({
+    text: "\n Button 'q' pressed",
+    color: Write.colors.fgYellow,
+  });
+  Write.printLine({
+    text: "Stopping STAR ATLAS AUTOMATION.",
+    color: Write.colors.fgYellow,
+  });
   clearInterval(runningProcess);
   process.exit(0);
 };
@@ -184,11 +268,6 @@ process.stdin.on("keypress", (character) => {
   }
   return false;
 });
-
-Write.printLine([
-  { text: "Starting STAR ATLAS AUTOMATION", color: Write.colors.fgYellow },
-  { text: "(press q to quit)", color: Write.colors.fgRed },
-]);
 
 start()
   .then(() => {
@@ -204,9 +283,8 @@ start()
 
       Write.printLine({
         text:
-          "Repeating process every " +
-          intervalTime / 60000 +
-          " minute(s).\n", color: Write.colors.fgYellow
+          "Repeating process every " + intervalTime / 60000 + " minute(s).\n",
+        color: Write.colors.fgYellow,
       });
 
       runningProcess = setInterval(start, intervalTime);
