@@ -1,0 +1,45 @@
+Arguments: 
+  C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\yarn\bin\yarn.js
+
+PATH: 
+  C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Users\marti\AppData\Roaming\nvm;C:\Program Files\nodejs;C:\Program Files\AutoFirma\AutoFirma;C:\Program Files\Git\cmd;C:\Program Files\PowerShell\7\;C:\Users\marti\AppData\Local\Microsoft\WindowsApps;C:\Users\marti\AppData\Roaming\nvm;C:\Program Files\nodejs;G:\DEV\staratlas-automation\node_modules\.bin
+
+Yarn version: 
+  1.22.19
+
+Node version: 
+  18.2.0
+
+Platform: 
+  win32 x64
+
+Trace: 
+  Error: EPERM: operation not permitted, unlink 'G:\DEV\staratlas-automation\node_modules\bufferutil\prebuilds\win32-x64\node.napi.node'
+
+npm manifest: 
+  {
+    "dependencies": {
+      "@solana/web3.js": "^1.43.0",
+      "@solana/spl-token": "^0.2.0",
+      "@staratlas/factory": "^0.1.26",
+      "bs58": "5.0.0",
+      "minimist": "1.2.6",
+      "prettier": "2.6.2"
+    },
+    "name": "staratlas-bot",
+    "version": "1.0.0",
+    "main": "index.js",
+    "devDependencies": {},
+    "scripts": {
+      "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "author": "",
+    "license": "ISC",
+    "description": ""
+  }
+
+yarn manifest: 
+  No manifest
+
+Lockfile: 
+  No lockfile
