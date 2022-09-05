@@ -1,5 +1,5 @@
 const web3 = require("@solana/web3.js");
-const atlas = require("@staratlas/factory/dist/score");
+const atlas = require("@staratlas/factory");
 const readlineModule = require("readline");
 const args = require("minimist")(
   process.argv.filter((val) => val.includes("="))
@@ -7,8 +7,17 @@ const args = require("minimist")(
 
 const Write = require("./lib/write");
 const Web3 = require("./lib/web3");
-const { connection, resourceAddresses, scoreProgramId, keypair, nftNames } =
-  Web3;
+const Nfts = require("./lib/nfts");
+const {createHarvestInstruction} = require("@staratlas/factory/dist/score");
+const {PublicKey} = require("@solana/web3.js");
+const {ShipStakingInfo} = require("@staratlas/factory");
+const {
+  connection,
+  resourceAddresses,
+  scoreProgramId,
+  keypair,
+  resourceAvailability,
+} = Web3;
 
 const userPublicKey = keypair.publicKey;
 
@@ -54,48 +63,16 @@ async function sendTransactions(txInstruction) {
   return await connection.sendTransaction(tx, [keypair]);
 }
 
-const calculatePercentLeft = (
-    maxReserve,
-    millisecondsToBurnOne,
-    shipQuantityInEscrow,
-    currentCapacityTimestamp,
-    now,
-    type
-) => {
-  // console.log(type);
-  const totalMax = maxReserve * shipQuantityInEscrow;
-  // console.log('totalMax', totalMax)
-  const totalConsumed =
-      (((now - currentCapacityTimestamp) * 1000) / millisecondsToBurnOne) *
-      shipQuantityInEscrow;
-  // console.log('totalConsumed', totalConsumed)
-  console.log('1 left: ', (100 / totalMax) * (totalMax - totalConsumed))
-  return (100 / totalMax) * (totalMax - totalConsumed);
-};
-
-const calculatePercentLeft2 = (
-    maxReserve,
-    millisecondsToBurnOne,
-    shipQuantityInEscrow,
-    currentTimeUntilEmpty,
-    lastUpdateTimestamp,
-    nowTimestamp,
-    type
-) => {
-  const totalMax = maxReserve * shipQuantityInEscrow;
-  const difference = nowTimestamp - lastUpdateTimestamp;
-  const totalLeft = ((currentTimeUntilEmpty - difference) * 1000) / millisecondsToBurnOne *
-      shipQuantityInEscrow;
-  const totalConsumed =
-      (((nowTimestamp - currentTimeUntilEmpty) * 1000) / millisecondsToBurnOne) *
-      shipQuantityInEscrow;
-  console.log('2 left: ', (100 / totalMax) * totalLeft)
-  return (100 / totalMax) * (totalMax - totalConsumed);
-};
+function calculatePercentLeft(fleetResourceBurnOutTime, shipTimeToBurnOneResource, currentCapacityTimestamp, shipResourceMaxReserve, currentTimeSec) {
+  const fleetResourceCapacity = fleetResourceBurnOutTime / (shipTimeToBurnOneResource / 1000)
+  const resourcesLeft = fleetResourceCapacity - (currentTimeSec - currentCapacityTimestamp) / (shipTimeToBurnOneResource / 1000)
+  return resourcesLeft / ((shipResourceMaxReserve) / 100)
+}
 
 let runningProcess;
+
 async function start() {
-  // console.clear();
+  console.clear();
   Write.printLine([
     { text: "STAR ATLAS AUTOMATION", color: Write.colors.fgYellow },
     { text: " (press q to quit)", color: Write.colors.fgRed },
@@ -105,16 +82,60 @@ async function start() {
   const nowSec = new Date().getTime() / 1000;
   await Web3.refreshAccountInfo();
 
-  let activeFleets;
+  let activeFleets = [];
   await atlas
     .getAllFleetsForUserPublicKey(connection, userPublicKey, scoreProgramId)
     .then(
-      (fleet) => (activeFleets = fleet),
+      async (stakingFleet) => {
+        activeFleets = stakingFleet;
+
+        // for (const fleet of stakingFleet) {
+        //   const { shipMint, shipQuantityInEscrow } = fleet;
+        //   const { millisecondsToBurnOneToolkit, millisecondsToBurnOneFuel, millisecondsToBurnOneFood, millisecondsToBurnOneArms} = await atlas.getScoreVarsShipInfo(
+        //       connection,
+        //       scoreProgramId,
+        //       fleet.shipMint
+        //   );
+        //   let needTransaction = false;
+        //
+        //   activeFleets.push({
+        //     name: Nfts[shipMint]?.name || Nfts[shipMint],
+        //     tool: {
+        //       label: 'HEALTH',
+        //       percentage: 0,
+        //       burnRate: millisecondsToBurnOneToolkit * shipQuantityInEscrow,
+        //     },
+        //     fuel: {
+        //       label: 'FUEL',
+        //       percentage: 0,
+        //       burnRate: millisecondsToBurnOneFuel * shipQuantityInEscrow,
+        //     },
+        //     food: {
+        //       label: 'FOOD',
+        //       percentage: 0,
+        //       burnRate: millisecondsToBurnOneFood * shipQuantityInEscrow,
+        //     },
+        //     arms: {
+        //       label: 'AMMO',
+        //       percentage: 0,
+        //       burnRate: millisecondsToBurnOneArms * shipQuantityInEscrow,
+        //     }
+        //   })
+        // }
+      },
       () => {
         Write.printLine({ text: "Error.", color: Write.colors.fgRed });
         exitProcess();
       }
     );
+
+  let burnRates = {
+    tool: 0,
+    fuel: 0,
+    food: 0,
+    arms: 0,
+  };
+  Write.printAvailableSupply(resourceAvailability);
 
   const transactionFleet = [];
   for (const fleet of activeFleets) {
@@ -123,95 +144,62 @@ async function start() {
     Write.printLine({
       text: `\n------------------------`,
     });
+    const shipName = Nfts[fleet.shipMint]?.name || Nfts[fleet.shipMint];
     Write.printLine({
-      text: `| ${nftNames[fleet.shipMint]} (${fleet.shipQuantityInEscrow}) |`,
+      text: `| ${shipName} (${
+        fleet.shipQuantityInEscrow
+      }) |`,
     });
-    console.log(new Date(fleet.currentCapacityTimestamp * 1000))
     Write.printLine({
       text: `------------------------`,
     });
-    let shipInfo = await atlas.getScoreVarsShipInfo(
+    const shipInfo = await atlas.getScoreVarsShipInfo(
       connection,
       scoreProgramId,
       fleet.shipMint
     );
+
     const healthPercent = calculatePercentLeft(
-        shipInfo.toolkitMaxReserve,
-        shipInfo.millisecondsToBurnOneToolkit,
-        fleet.shipQuantityInEscrow,
-        fleet.repairedAtTimestamp,
-        nowSec,
-        'health'
-    );
-    const healthPercent2 = calculatePercentLeft2(
-        shipInfo.toolkitMaxReserve,
-        shipInfo.millisecondsToBurnOneToolkit,
-        fleet.shipQuantityInEscrow,
         fleet.healthCurrentCapacity,
-        fleet.repairedAtTimestamp,
+        shipInfo.millisecondsToBurnOneToolkit,
+        fleet.currentCapacityTimestamp,
+        shipInfo.toolkitMaxReserve,
         nowSec,
-        'health'
     );
+
     Write.printPercent(healthPercent, "HEALTH");
     if (healthPercent <= triggerPercentage) needTransaction = true;
 
     const fuelPercent = calculatePercentLeft(
-      shipInfo.fuelMaxReserve,
-      shipInfo.millisecondsToBurnOneFuel,
-      fleet.shipQuantityInEscrow,
-      fleet.fueledAtTimestamp,
-      nowSec,
-        'fuel'
-    );
-    const fuelPercent2 = calculatePercentLeft2(
-        shipInfo.fuelMaxReserve,
-        shipInfo.millisecondsToBurnOneFuel,
-        fleet.shipQuantityInEscrow,
         fleet.fuelCurrentCapacity,
-        fleet.fueledAtTimestamp,
+        shipInfo.millisecondsToBurnOneFuel,
+        fleet.currentCapacityTimestamp,
+        shipInfo.fuelMaxReserve,
         nowSec,
-        'fuel'
     );
+
     Write.printPercent(fuelPercent, "FUEL");
     if (fuelPercent <= triggerPercentage) needTransaction = true;
 
     const foodPercent = calculatePercentLeft(
-        shipInfo.foodMaxReserve,
-        shipInfo.millisecondsToBurnOneFood,
-        fleet.shipQuantityInEscrow,
-        fleet.fedAtTimestamp,
-        nowSec,
-        'food'
-    );
-    const foodPercent2 = calculatePercentLeft2(
-        shipInfo.foodMaxReserve,
-        shipInfo.millisecondsToBurnOneFood,
-        fleet.shipQuantityInEscrow,
         fleet.foodCurrentCapacity,
-        fleet.fedAtTimestamp,
+        shipInfo.millisecondsToBurnOneFood,
+        fleet.currentCapacityTimestamp,
+        shipInfo.foodMaxReserve,
         nowSec,
-        'food'
     );
+
     Write.printPercent(foodPercent, "FOOD");
     if (foodPercent <= triggerPercentage) needTransaction = true;
 
     const armsPercent = calculatePercentLeft(
-        shipInfo.armsMaxReserve,
-        shipInfo.millisecondsToBurnOneArms,
-        fleet.shipQuantityInEscrow,
-        fleet.armedAtTimestamp,
-        nowSec,
-        'arms'
-    );
-    const armsPercent2 = calculatePercentLeft2(
-        shipInfo.armsMaxReserve,
-        shipInfo.millisecondsToBurnOneArms,
-        fleet.shipQuantityInEscrow,
         fleet.armsCurrentCapacity,
-        fleet.armedAtTimestamp,
+        shipInfo.millisecondsToBurnOneArms,
+        fleet.currentCapacityTimestamp,
+        shipInfo.armsMaxReserve,
         nowSec,
-        'arms'
     );
+
     Write.printPercent(armsPercent, "ARMS");
     if (armsPercent <= triggerPercentage) needTransaction = true;
 
@@ -222,15 +210,44 @@ async function start() {
       });
     }
 
+    if(shipName === 'Pearce X4') {
+      console.log('TEST SETTLE / CLAIM ATLAS');
+
+      const txInstructions = [];
+
+      // CLAIM ATLAS
+      //   txInstructions.push(await atlas.createHarvestInstruction(
+      //       connection,
+      //       userPublicKey,
+      //       new PublicKey(Web3.atlasTokenMint),
+      //       new PublicKey(fleet.shipMint),
+      //       scoreProgramId
+      //   ));
+
+      // BUY FOOD
+
+      if(!!txInstructions.length) {
+        await sendTransactions(txInstructions).then(async () => {
+          Write.printLine({ text: "\n  DID SHIT, RIGHT?" });
+        });
+      }
+
+    }
+
     Write.printLine({
       text: `------------------------`,
     });
   }
 
+
+
+
   if (transactionFleet.length > 0) {
     for (const { fleet, shipInfo } of transactionFleet) {
       Write.printLine({
-        text: `\n ### Refilling ${nftNames[fleet.shipMint]} ###`,
+        text: `\n ### Refilling ${
+          Nfts[fleet.shipMint]?.name || Nfts[fleet.shipMint]
+        } ###`,
       });
 
       const txInstructions = [];
@@ -265,6 +282,9 @@ process.stdin.setRawMode(true);
 process.stdin.on("keypress", (character) => {
   if (character.toString() === "q") {
     return exitProcess();
+  }
+  if ( character.toString() === "i") {
+    return Write.printAvailableSupply(resourceAvailability);
   }
   return false;
 });
