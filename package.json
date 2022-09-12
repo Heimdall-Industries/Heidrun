@@ -1,16 +1,18 @@
 {
   "dependencies": {
-    "@solana/web3.js": "^1.56.2",
-    "@solana/spl-token": "^0.3.4",
-    "@staratlas/factory": "^0.3.4",
-    "bs58": "^5.0.0",
-    "minimist": "^1.2.6",
-    "prettier": "^2.7.1"
+    "@project-serum/anchor": "0.25.0",
+    "@project-serum/borsh": "0.2.5",
+    "@solana/spl-token": "0.3.4",
+    "@solana/web3.js": "1.56.2",
+    "@staratlas/factory": "0.3.4",
+    "bs58": "5.0.0",
+    "minimist": "1.2.6",
+    "node-fetch": "2.6.7",
+    "prettier": "2.7.1"
   },
   "name": "staratlas-bot",
   "version": "1.0.0",
   "main": "index.js",
-  "devDependencies": {},
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
