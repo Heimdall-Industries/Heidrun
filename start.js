@@ -4,22 +4,31 @@ const readlineModule = require("readline");
 const args = require("minimist")(
   process.argv.filter((val) => val.includes("="))
 );
-
 const Write = require("./lib/write");
 const Web3 = require("./lib/web3");
-const Nfts = require("./lib/nfts");
-const {createHarvestInstruction} = require("@staratlas/factory/dist/score");
+const { GmClientService} = require('@staratlas/factory');
 const {PublicKey} = require("@solana/web3.js");
-const {ShipStakingInfo} = require("@staratlas/factory");
 const {
   connection,
   resourceAddresses,
   scoreProgramId,
   keypair,
   resourceAvailability,
+    traderProgramId,
+    traderOwnerId,
+  getNftInformation,
 } = Web3;
 
+const triggerPercentage = 10;
+const orderForDays = 1;
 const userPublicKey = keypair.publicKey;
+const millisecondsInDay = 86100000;
+let perDay = {
+  fuel: [],
+  food: [],
+  arms: [],
+  toolkit: [],
+}
 
 const getTxInstruction = async (type, shipInfo, fleet) => {
   const {
@@ -30,7 +39,7 @@ const getTxInstruction = async (type, shipInfo, fleet) => {
   } = atlas;
   let createInstruction;
   switch (type) {
-    case "ammo":
+    case "arms":
       createInstruction = createRearmInstruction;
       break;
     case "food":
@@ -39,7 +48,7 @@ const getTxInstruction = async (type, shipInfo, fleet) => {
     case "fuel":
       createInstruction = createRefuelInstruction;
       break;
-    case "tool":
+    case "toolkit":
       createInstruction = createRepairInstruction;
       break;
     default:
@@ -63,13 +72,92 @@ async function sendTransactions(txInstruction) {
   return await connection.sendTransaction(tx, [keypair]);
 }
 
-function calculatePercentLeft(fleetResourceBurnOutTime, shipTimeToBurnOneResource, currentCapacityTimestamp, shipResourceMaxReserve, currentTimeSec) {
+const getResourcesLeft = (fleetResourceBurnOutTime, shipTimeToBurnOneResource, currentCapacityTimestamp, currentTimeSec) => {
   const fleetResourceCapacity = fleetResourceBurnOutTime / (shipTimeToBurnOneResource / 1000)
-  const resourcesLeft = fleetResourceCapacity - (currentTimeSec - currentCapacityTimestamp) / (shipTimeToBurnOneResource / 1000)
+  return fleetResourceCapacity - (currentTimeSec - currentCapacityTimestamp) / (shipTimeToBurnOneResource / 1000);
+}
+
+function calculatePercentLeft(fleetResourceBurnOutTime, shipTimeToBurnOneResource, currentCapacityTimestamp, shipResourceMaxReserve, currentTimeSec) {
+  const resourcesLeft = getResourcesLeft(fleetResourceBurnOutTime, shipTimeToBurnOneResource, currentCapacityTimestamp, currentTimeSec)
   return resourcesLeft / ((shipResourceMaxReserve) / 100)
 }
 
 let runningProcess;
+const gmClientService = new GmClientService();
+
+async function claimAtlas(activeFleets) {
+  const txInstructions = [];
+
+  for (const fleet of activeFleets) {
+
+    txInstructions.push(await atlas.createHarvestInstruction(
+        connection,
+        userPublicKey,
+        new PublicKey(Web3.atlasTokenMint),
+        fleet.shipMint,
+        scoreProgramId
+    ));
+  }
+  if(!!txInstructions.length) {
+    return await connection.sendTransaction(new web3.Transaction().add(...txInstructions), [keypair]);
+  }
+
+  return Promise.resolve(false);
+}
+
+async function orderResources(nftInformation) {
+  const orders = await gmClientService.getOpenOrdersForPlayer(connection, new PublicKey(traderOwnerId), traderProgramId)
+  await Promise.allSettled(orders.map(async (order) => {
+    const resource = nftInformation.find(nft => {
+      return nft.mint === order.orderMint
+    });
+    const resourceName = resource.name === 'Ammunition' ? 'Arms' : resource.name;
+
+    return  await connection.sendTransaction(new web3.Transaction().add((await gmClientService.getCreateExchangeTransaction(
+        connection,
+        order,
+        userPublicKey,
+        perDay[resourceName.toLowerCase()].reduce((partialSum, a) => partialSum + a, 0) * orderForDays,
+        traderProgramId,
+    )).transaction), [keypair]).then(async () => {
+      Write.printLine({text: "\n  ORDER COMPLETED: " + resource.name});
+    });
+  }));
+}
+
+const haveEnoughResources = ({ fleet, shipInfo }, nowSec) => {
+  let enoughResources = true;
+  for (const resource of Object.keys(resourceAddresses)) {
+    const shipAmount = fleet.shipQuantityInEscrow;
+    const fleetResource = resource === 'toolkit' ? 'health' : resource;
+    const left = getResourcesLeft(
+        fleet[`${fleetResource}CurrentCapacity`],
+        shipInfo[`millisecondsToBurnOne${resource.charAt(0).toUpperCase() + resource.slice(1)}`],
+        fleet.currentCapacityTimestamp,
+        nowSec,
+    );
+
+    const max = shipInfo[`${resource}MaxReserve`] * shipAmount;
+    const current = left * shipAmount;
+    const needed = max - current;
+    if(resourceAvailability[resource] < needed) {
+      enoughResources = false;
+    }
+  }
+
+  return Promise.resolve(enoughResources);
+}
+
+const refillResources = async ({ fleet, shipInfo }) => {
+  const txInstructions = [];
+
+  for (const resource of Object.keys(resourceAddresses)) {
+    const instruction = await getTxInstruction(resource, shipInfo, fleet);
+    txInstructions.push(instruction);
+  }
+
+  return await sendTransactions(txInstructions);
+}
 
 async function start() {
   console.clear();
@@ -77,64 +165,31 @@ async function start() {
     { text: "STAR ATLAS AUTOMATION", color: Write.colors.fgYellow },
     { text: " (press q to quit)", color: Write.colors.fgRed },
   ]);
-  const triggerPercentage = 1;
+
+  perDay = {
+    fuel: [],
+    food: [],
+    arms: [],
+    toolkit: [],
+  }
   Write.printCheckTime();
   const nowSec = new Date().getTime() / 1000;
+  Write.printLine([
+    { text: "Recovering NFT information", color: Write.colors.fgWhite },
+  ]);
+  const nftInformation = (await getNftInformation()).filter(nft => nft.attributes.itemType === 'ship' || nft.attributes.itemType === 'resource');
   await Web3.refreshAccountInfo();
 
   let activeFleets = [];
   await atlas
     .getAllFleetsForUserPublicKey(connection, userPublicKey, scoreProgramId)
     .then(
-      async (stakingFleet) => {
-        activeFleets = stakingFleet;
-
-        // for (const fleet of stakingFleet) {
-        //   const { shipMint, shipQuantityInEscrow } = fleet;
-        //   const { millisecondsToBurnOneToolkit, millisecondsToBurnOneFuel, millisecondsToBurnOneFood, millisecondsToBurnOneArms} = await atlas.getScoreVarsShipInfo(
-        //       connection,
-        //       scoreProgramId,
-        //       fleet.shipMint
-        //   );
-        //   let needTransaction = false;
-        //
-        //   activeFleets.push({
-        //     name: Nfts[shipMint]?.name || Nfts[shipMint],
-        //     tool: {
-        //       label: 'HEALTH',
-        //       percentage: 0,
-        //       burnRate: millisecondsToBurnOneToolkit * shipQuantityInEscrow,
-        //     },
-        //     fuel: {
-        //       label: 'FUEL',
-        //       percentage: 0,
-        //       burnRate: millisecondsToBurnOneFuel * shipQuantityInEscrow,
-        //     },
-        //     food: {
-        //       label: 'FOOD',
-        //       percentage: 0,
-        //       burnRate: millisecondsToBurnOneFood * shipQuantityInEscrow,
-        //     },
-        //     arms: {
-        //       label: 'AMMO',
-        //       percentage: 0,
-        //       burnRate: millisecondsToBurnOneArms * shipQuantityInEscrow,
-        //     }
-        //   })
-        // }
-      },
+      async (stakingFleet) => activeFleets = stakingFleet,
       () => {
         Write.printLine({ text: "Error.", color: Write.colors.fgRed });
         exitProcess();
       }
     );
-
-  let burnRates = {
-    tool: 0,
-    fuel: 0,
-    food: 0,
-    arms: 0,
-  };
   Write.printAvailableSupply(resourceAvailability);
 
   const transactionFleet = [];
@@ -144,9 +199,11 @@ async function start() {
     Write.printLine({
       text: `\n------------------------`,
     });
-    const shipName = Nfts[fleet.shipMint]?.name || Nfts[fleet.shipMint];
+    const nft = nftInformation.find(nft => {
+      return nft.mint === fleet.shipMint.toString()
+    });
     Write.printLine({
-      text: `| ${shipName} (${
+      text: `| ${nft.name} (${
         fleet.shipQuantityInEscrow
       }) |`,
     });
@@ -156,7 +213,7 @@ async function start() {
     const shipInfo = await atlas.getScoreVarsShipInfo(
       connection,
       scoreProgramId,
-      fleet.shipMint
+      new web3.PublicKey(nft.mint)
     );
 
     const healthPercent = calculatePercentLeft(
@@ -201,63 +258,59 @@ async function start() {
     );
 
     Write.printPercent(armsPercent, "ARMS");
-    if (armsPercent <= triggerPercentage) needTransaction = true;
+    if (armsPercent <= triggerPercentage) {
+      needTransaction = true;
+    }
 
     if (needTransaction) {
       transactionFleet.push({
-        fleet: fleet,
-        shipInfo: shipInfo,
+        fleet,
+        shipInfo,
+        nft
       });
     }
 
-    if(shipName === 'Pearce X4') {
-      console.log('TEST SETTLE / CLAIM ATLAS');
-
-      const txInstructions = [];
-
-      // CLAIM ATLAS
-      //   txInstructions.push(await atlas.createHarvestInstruction(
-      //       connection,
-      //       userPublicKey,
-      //       new PublicKey(Web3.atlasTokenMint),
-      //       new PublicKey(fleet.shipMint),
-      //       scoreProgramId
-      //   ));
-
-      // BUY FOOD
-
-      if(!!txInstructions.length) {
-        await sendTransactions(txInstructions).then(async () => {
-          Write.printLine({ text: "\n  DID SHIT, RIGHT?" });
-        });
-      }
-
-    }
+    const calculateDailyUsage = (millisecondsForOne) => (millisecondsInDay / millisecondsForOne) * fleet.shipQuantityInEscrow
+    const { millisecondsToBurnOneFuel, millisecondsToBurnOneArms, millisecondsToBurnOneFood, millisecondsToBurnOneToolkit } = shipInfo;
+    perDay.fuel.push(calculateDailyUsage(millisecondsToBurnOneFuel));
+    perDay.food.push(calculateDailyUsage(millisecondsToBurnOneFood));
+    perDay.arms.push(calculateDailyUsage(millisecondsToBurnOneArms));
+    perDay.toolkit.push(calculateDailyUsage(millisecondsToBurnOneToolkit));
 
     Write.printLine({
       text: `------------------------`,
     });
   }
 
-
-
-
   if (transactionFleet.length > 0) {
-    for (const { fleet, shipInfo } of transactionFleet) {
+    for (const { fleet, shipInfo, nft } of transactionFleet) {
       Write.printLine({
         text: `\n ### Refilling ${
-          Nfts[fleet.shipMint]?.name || Nfts[fleet.shipMint]
+            nft.name
         } ###`,
       });
 
-      const txInstructions = [];
-      for (const resource of Object.keys(resourceAddresses)) {
-        txInstructions.push(await getTxInstruction(resource, shipInfo, fleet));
-      }
+      const hasEnoughResources = await haveEnoughResources({ fleet, shipInfo }, nowSec);
 
-      await sendTransactions(txInstructions).then(async () => {
-        Write.printLine({ text: "\n  Resources refilled successfully" });
-      });
+      if(hasEnoughResources) {
+        await refillResources({shipInfo, fleet}).then(async () => {
+          Write.printLine({ text: "\n  Resources refilled successfully" });
+        });
+      } else {
+        Write.printLine({ text: "\n  Not enough resources, claiming ATLAS" });
+        await claimAtlas(activeFleets).then(async (result) => {
+          if(!!result) {
+            Write.printLine({ text: "\n  ATLAS claimed successfully, buying resources" });
+            await orderResources(nftInformation).then( async () => {
+              Write.printLine({ text: "\n  Resources bought, refilling" });
+              await refillResources({shipInfo, fleet}).then(async () => {
+                Write.printLine({ text: "\n  Resources refilled successfully" });
+              });
+            })
+          }
+        })
+
+      }
     }
   } else {
     Write.printLine({ text: "\n  No need to refill fleet." });
@@ -280,10 +333,10 @@ const exitProcess = () => {
 readlineModule.emitKeypressEvents(process.stdin);
 process.stdin.setRawMode(true);
 process.stdin.on("keypress", (character) => {
-  if (character.toString() === "q") {
+  if (character?.toString() === "q") {
     return exitProcess();
   }
-  if ( character.toString() === "i") {
+  if ( character?.toString() === "i") {
     return Write.printAvailableSupply(resourceAvailability);
   }
   return false;
