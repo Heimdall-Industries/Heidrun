@@ -29,6 +29,7 @@ let perDay = {
   arms: [],
   toolkit: [],
 }
+let nftInformation = [];
 
 const getTxInstruction = async (type, shipInfo, fleet) => {
   const {
@@ -174,10 +175,12 @@ async function start() {
   }
   Write.printCheckTime();
   const nowSec = new Date().getTime() / 1000;
-  Write.printLine([
-    { text: "Recovering NFT information", color: Write.colors.fgWhite },
-  ]);
-  const nftInformation = (await getNftInformation()).filter(nft => nft.attributes.itemType === 'ship' || nft.attributes.itemType === 'resource');
+  if(!nftInformation.length) {
+    Write.printLine([
+      { text: "Recovering NFT information", color: Write.colors.fgYellow },
+    ]);
+    nftInformation = (await getNftInformation()).filter(nft => nft.attributes.itemType === 'ship' || nft.attributes.itemType === 'resource');
+  }
   await Web3.refreshAccountInfo();
 
   let activeFleets = [];
