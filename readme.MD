@@ -1,6 +1,6 @@
-# StarAtlas Automation
+# Heimðall Industries StarAtlas Automation
 
-You need to have your private key in a file called key.txt.
+You need to have your private key in a file called information.json.
 Be careful to whom can access your file.
 
 run it using:
@@ -17,7 +17,7 @@ To download and prepare the script do the following:
  - `npm install`
 
 Then the final steps, remember to be careful with your private key!
- - Create the file `.info.txt` inside of the lib directory with only your private wallet key in it
+ - Create the file `information.json` inside of the root directory and fill in your private key, you can check / copy / rename the example file `information.example.json`.
  - Back in the root directory now run `node .\start.js` and open Netflix!
 
 There can be some unexpected errors sometimes, which will mean that you need to restart the script, but it works pretty nicely, enjoy!
