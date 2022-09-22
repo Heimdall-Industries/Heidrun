@@ -1,3 +1,5 @@
 {
-  "privateKey": "YOURPRIVATEKEY123"
+  "privateKey": "YOURPRIVATEKEY123",
+  "autoBuy":  "NFTMINTID123",
+  "autoStake": "boolean"
 }
