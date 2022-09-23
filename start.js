@@ -9,15 +9,6 @@ const Web3 = require("./lib/web3");
 const { GmClientService } = require("@staratlas/factory");
 const { PublicKey } = require("@solana/web3.js");
 const {
-  getScoreEscrowAccount,
-  getShipStakingAccount,
-  getScoreEscrowAuthAccount,
-  getScoreVarsShipInfo,
-  getScoreTreasuryTokenAccount,
-  getScoreVarsShipAccount,
-  getScoreTreasuryAuthAccount,
-} = require("@staratlas/factory/dist/score");
-const {
   DECIMALS,
   autoBuy,
   autoStake,
@@ -39,12 +30,13 @@ const {
 let nftAutoBuyInformation;
 let activeFleets = [];
 const triggerPercentage = 1;
-const orderForDays = 1;
+const orderForDays = 30;
 const userPublicKey = keypair.publicKey;
 const millisecondsInDay = 86100000;
 const minimumIntervalTime = 600000;
 const maximumIntervalTime = 6000000;
 let intervalTime = 0;
+let nowSec;
 let perDay = {
   fuel: [],
   food: [],
@@ -52,26 +44,64 @@ let perDay = {
   toolkit: [],
 };
 
-const getTxInstruction = async (type, shipInfo, fleet) => {
+const getResupplyInstruction = async (resource, shipInfo, fleet) => {
   const {
     createRefeedInstruction,
     createRearmInstruction,
     createRefuelInstruction,
     createRepairInstruction,
   } = atlas;
+  let quantity;
   let createInstruction;
-  switch (type) {
-    case "arms":
+
+  switch (resource.name) {
+    case "Ammunition":
       createInstruction = createRearmInstruction;
+      quantity =
+        (shipInfo.armsMaxReserve -
+          getResourcesLeft(
+            fleet.armsCurrentCapacity,
+            shipInfo.millisecondsToBurnOneArms,
+            fleet.currentCapacityTimestamp,
+            nowSec
+          )) *
+        fleet.shipQuantityInEscrow;
       break;
-    case "food":
+    case "Food":
       createInstruction = createRefeedInstruction;
+      quantity =
+        (shipInfo.foodMaxReserve -
+          getResourcesLeft(
+            fleet.foodCurrentCapacity,
+            shipInfo.millisecondsToBurnOneFood,
+            fleet.currentCapacityTimestamp,
+            nowSec
+          )) *
+        fleet.shipQuantityInEscrow;
       break;
-    case "fuel":
+    case "Fuel":
       createInstruction = createRefuelInstruction;
+      quantity =
+        (shipInfo.fuelMaxReserve -
+          getResourcesLeft(
+            fleet.fuelCurrentCapacity,
+            shipInfo.millisecondsToBurnOneFuel,
+            fleet.currentCapacityTimestamp,
+            nowSec
+          )) *
+        fleet.shipQuantityInEscrow;
       break;
-    case "toolkit":
+    case "Toolkit":
       createInstruction = createRepairInstruction;
+      quantity =
+        (shipInfo.toolkitMaxReserve -
+          getResourcesLeft(
+            fleet.healthCurrentCapacity,
+            shipInfo.millisecondsToBurnOneToolkit,
+            fleet.currentCapacityTimestamp,
+            nowSec
+          )) *
+        fleet.shipQuantityInEscrow;
       break;
     default:
       return false;
@@ -81,10 +111,10 @@ const getTxInstruction = async (type, shipInfo, fleet) => {
     connection,
     userPublicKey,
     userPublicKey,
-    shipInfo.foodMaxReserve * fleet.shipQuantityInEscrow,
+    quantity,
     fleet.shipMint,
-    new web3.PublicKey(resourceAddresses[type]),
-    Web3.getTokenPublicKey(resourceAddresses[type]),
+    new PublicKey(resource.mint),
+    new PublicKey(resource.tokenAccount),
     scoreProgramId
   );
 };
@@ -144,10 +174,7 @@ async function claimAtlas() {
   }
 
   if (!!txInstructions.length) {
-    return await connection.sendTransaction(
-      new web3.Transaction().add(...txInstructions),
-      [keypair]
-    );
+    return await sendTransactions(txInstructions);
   }
 
   return Promise.resolve(false);
@@ -229,7 +256,6 @@ const haveEnoughResources = ({ fleet, shipInfo }, nowSec) => {
 
 const processAutoBuy = async (shipToAutoBuy) => {
   if (!!shipToAutoBuy) {
-    const owner = "7WP5aiEZC1re6qcWqCo6UvufNcRkanvfJyGBeYju6qPY";
     const sellOrders = (
       await gmClientService.getOpenOrdersForAsset(
         connection,
@@ -242,15 +268,22 @@ const processAutoBuy = async (shipToAutoBuy) => {
           order.currencyMint === atlasTokenMint && order.orderType === "sell"
       )
       .sort((a, b) => (a.price / DECIMALS < b.price / DECIMALS ? -1 : 1));
-    const sellOrder = sellOrders.find((order) => order.owner === owner);
+    sellOrders.splice(0, 2);
+    const [sellOrder] = sellOrders;
+
     const atlas = inventory.find((item) => item.mint === atlasTokenMint);
     const price =
       sellOrder.price / Number("1".padEnd(sellOrder.currencyDecimals + 1, "0"));
 
     if (atlas.amount > price) {
       const quantity = Math.floor(atlas.amount / price);
-
-      return await sendMarketOrder({ order: sellOrder, quantity });
+      return await sendMarketOrder({
+        order: sellOrder,
+        quantity:
+          quantity > sellOrder.orderQtyRemaining
+            ? sellOrder.orderQtyRemaining
+            : quantity,
+      });
     }
   }
 };
@@ -258,8 +291,9 @@ const processAutoBuy = async (shipToAutoBuy) => {
 const refillResources = async ({ fleet, shipInfo }) => {
   const txInstructions = [];
 
-  for (const resource of Object.keys(resourceAddresses)) {
-    const instruction = await getTxInstruction(resource, shipInfo, fleet);
+  const resources = inventory.filter((item) => item.type === "resource");
+  for (const resource of resources) {
+    const instruction = await getResupplyInstruction(resource, shipInfo, fleet);
     txInstructions.push(instruction);
   }
 
@@ -281,6 +315,7 @@ const refreshInventory = async () => {
   if (autoStake) {
     const ships = accountInfo.filter((value) => value.type === "ship");
     const others = accountInfo.filter((value) => value.type !== "ship");
+
     if (!!ships.length) {
       for (const ship of ships) {
         Write.printLine({
@@ -290,20 +325,14 @@ const refreshInventory = async () => {
         const fleet = activeFleets.find(
           (fleet) => fleet.shipMint.toString() === ship.mint
         );
-        const [shipTokenAccount] = (
-          await connection.getTokenAccountsByOwner(userPublicKey, {
-            mint: new PublicKey(ship.mint),
-          })
-        ).value;
         let tx;
-
         if (!!fleet) {
           tx = await atlas.createPartialDepositInstruction(
             connection,
             userPublicKey,
             ship.amount,
             new PublicKey(ship.mint),
-            shipTokenAccount.pubkey,
+            new PublicKey(ship.tokenAccount),
             new PublicKey(scoreProgramId)
           );
         } else {
@@ -312,7 +341,7 @@ const refreshInventory = async () => {
             userPublicKey,
             ship.amount,
             new PublicKey(ship.mint),
-            shipTokenAccount.pubkey,
+            new PublicKey(ship.tokenAccount),
             new PublicKey(scoreProgramId)
           );
         }
@@ -373,8 +402,7 @@ const printLogo = async () =>
       text: "            STAR ATLAS AUTOMATION\n\n",
       color: Write.colors.fgYellow,
     },
-    { text: " Service running.", color: Write.colors.fgYellow },
-    { text: " (press q to quit)", color: Write.colors.fgRed },
+    { text: "Options: (b)uy, (c)laim, (q)uit", color: Write.colors.fgRed },
   ]);
 
 async function start() {
@@ -388,7 +416,7 @@ async function start() {
     toolkit: [],
   };
 
-  const nowSec = new Date().getTime() / 1000;
+  nowSec = new Date().getTime() / 1000;
   if (!nftInformation.length) {
     Write.printLine([
       { text: " Fetching latest flight data...", color: Write.colors.fgYellow },
@@ -590,18 +618,52 @@ process.stdin.on("keypress", (character) => {
   if (character?.toString() === "q") {
     return exitProcess();
   }
+  if (character?.toString() === "b") {
+    if (!!nftAutoBuyInformation) {
+      Write.printLine({
+        text: "Starting auto buy process.",
+        color: Write.colors.fgYellow,
+      });
+      return processAutoBuy(nftAutoBuyInformation).then(() => {
+        Write.printLine({
+          text: "Auto buy process finished.",
+          color: Write.colors.fgYellow,
+        });
+      });
+    } else {
+      Write.printLine({
+        text: "Auto buy not enabled.",
+        color: Write.colors.fgRed,
+      });
+    }
+  }
+  if (character?.toString() === "c") {
+    Write.printLine({
+      text: "Starting claim ATLAS process.",
+      color: Write.colors.fgYellow,
+    });
+    return claimAtlas().then(() => {
+      Write.printLine({
+        text: "Claim ATLAS process finished.",
+        color: Write.colors.fgYellow,
+      });
+    });
+  }
   if (character?.toString() === "i") {
     return Write.printAvailableSupply(resourceAvailability);
   }
   return false;
 });
 
+const startInterval = () => {
+  if (args.noRunningProcess !== "true") {
+    clearInterval(runningProcess);
+    runningProcess = setInterval(start, intervalTime);
+  } else {
+    process.exit(0);
+  }
+};
+
 start()
-  .then(() => {
-    if (args.noRunningProcess !== "true") {
-      runningProcess = setInterval(start, intervalTime);
-    } else {
-      process.exit(0);
-    }
-  })
+  .then(startInterval)
   .catch((err) => console.error(err));
