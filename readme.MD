@@ -22,6 +22,13 @@ Then the final steps, remember to be careful with your private key!
 
 There can be some unexpected errors sometimes, which will mean that you need to restart the script, but it works pretty nicely, enjoy!
 
+## Optional information arguments:
+
+The following arguments can be added to your own `information.json`:
+
+ - autoBuy: place the ship mint address here to automatically buy this ship after the full claim Atlas, buy resources, resupply fleet.
+ - autoStake: `true` or `false` to automatically stake ships found in your inventory.
+
 ## Optional arguments:
 
 ### Interval (600000 / 6000000)
