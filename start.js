@@ -135,7 +135,7 @@ const getResourcesLeft = (
   return (
     fleetResourceCapacity -
     (currentTimeSec - currentCapacityTimestamp) /
-      (shipTimeToBurnOneResource / 1000)
+    (shipTimeToBurnOneResource / 1000)
   );
 };
 
@@ -235,14 +235,12 @@ const haveEnoughResources = ({ fleet, shipInfo }, nowSec) => {
     const left = getResourcesLeft(
       fleet[`${fleetResource}CurrentCapacity`],
       shipInfo[
-        `millisecondsToBurnOne${
-          resource.charAt(0).toUpperCase() + resource.slice(1)
-        }`
+      `millisecondsToBurnOne${resource.charAt(0).toUpperCase() + resource.slice(1)
+      }`
       ],
       fleet.currentCapacityTimestamp,
       nowSec
     );
-
     const max = shipInfo[`${resource}MaxReserve`] * shipAmount;
     const current = left * shipAmount;
     const needed = max - current;
