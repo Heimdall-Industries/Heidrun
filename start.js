@@ -613,7 +613,9 @@ const exitProcess = () => {
 };
 
 readlineModule.emitKeypressEvents(process.stdin);
-process.stdin.setRawMode(true);
+if (process.stdin.isTTY) {
+  process.stdin.setRawMode(true);
+}
 process.stdin.on("keypress", (character) => {
   if (character?.toString() === "q") {
     return exitProcess();
