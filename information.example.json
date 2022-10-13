@@ -1,5 +1,6 @@
 {
   "privateKey": "YOURPRIVATEKEY123",
-  "autoBuy":  "NFTMINTID123",
+  "rpcURL": "YOURPRIVATERPCURL",
+  "autoBuy": "NFTMINTID123",
   "autoStake": "boolean"
 }

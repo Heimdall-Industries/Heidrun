@@ -12,7 +12,7 @@ First install the following:
  - [Node](https://nodejs.org/en/download/): You will need to install node to be able to run this script.
 
 To download and prepare the script do the following:
- - `git clone git@github.com:MartinGerritsen/staratlas-automation.git`
+ - `git clone git@github.com:Heimdall-Industries/staratlas-automation.git`
  - `cd startatlas-automation`
  - `npm install`
 
@@ -26,6 +26,7 @@ There can be some unexpected errors sometimes, which will mean that you need to 
 
 The following arguments can be added to your own `information.json`:
 
+ - rpcURL: use a private rpc URL, so you don't encounter "429 Too Many Requests" errors
  - autoBuy: place the ship mint address here to automatically buy this ship after the full claim Atlas, buy resources, resupply fleet.
  - autoStake: `true` or `false` to automatically stake ships found in your inventory.
 

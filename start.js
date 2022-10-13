@@ -400,7 +400,7 @@ const printLogo = async () =>
       text: "            STAR ATLAS AUTOMATION\n\n",
       color: Write.colors.fgYellow,
     },
-    { text: "Options: (b)uy, (c)laim, (q)uit", color: Write.colors.fgRed },
+    { text: "Options: (i)nventory, (b)uy, (c)laim, (q)uit", color: Write.colors.fgRed },
   ]);
 
 async function start() {
@@ -650,7 +650,7 @@ process.stdin.on("keypress", (character) => {
     });
   }
   if (character?.toString() === "i") {
-    return Write.printAvailableSupply(resourceAvailability);
+    return Write.printAvailableSupply(inventory);
   }
   return false;
 });
