@@ -464,7 +464,7 @@ async function start(isFirst = false) {
       nowSec
     );
 
-    Write.printPercent(healthPercent, "HEALTH");
+    Write.printPercent(healthPercent > 0 ? healthPercent : 0 , "HEALTH");
     if (healthPercent <= triggerPercentage) needTransaction = true;
 
     const fuelPercent = calculatePercentLeft(
@@ -475,7 +475,7 @@ async function start(isFirst = false) {
       nowSec
     );
 
-    Write.printPercent(fuelPercent, "FUEL");
+    Write.printPercent(fuelPercent > 0 ? fuelPercent : 0, "FUEL");
     if (fuelPercent <= triggerPercentage) needTransaction = true;
 
     const foodPercent = calculatePercentLeft(
@@ -486,7 +486,7 @@ async function start(isFirst = false) {
       nowSec
     );
 
-    Write.printPercent(foodPercent, "FOOD");
+    Write.printPercent(foodPercent > 0 ? foodPercent : 0, "FOOD");
     if (foodPercent <= triggerPercentage) needTransaction = true;
 
     const armsPercent = calculatePercentLeft(
@@ -497,7 +497,7 @@ async function start(isFirst = false) {
       nowSec
     );
 
-    Write.printPercent(armsPercent, "ARMS");
+    Write.printPercent(armsPercent > 0 ? armsPercent : 0, "ARMS");
     if (armsPercent <= triggerPercentage) {
       needTransaction = true;
     }

@@ -25,7 +25,7 @@ The following arguments can be added to your own `information.json`:
 
  - autoBuy: place the ship mint address here to automatically buy this ship after the full claim Atlas, buy resources, resupply fleet.
  - autoStake: `true` or `false` to automatically stake ships found in your inventory.
- - customConnection: The address of your personal rpc server.
+ - customRpc: The address of your personal rpc server.
 
 ## Optional arguments:
 
