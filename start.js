@@ -1,13 +1,12 @@
 const web3 = require("@solana/web3.js");
 const atlas = require("@staratlas/factory");
+const { PublicKey } = require("@solana/web3.js");
 const readlineModule = require("readline");
-const args = require("minimist")(
-  process.argv.filter((val) => val.includes("="))
-);
+const args = require("minimist")(process.argv.slice(2));
+
 const Write = require("./lib/write");
 const Web3 = require("./lib/web3");
-const { GmClientService } = require("@staratlas/factory");
-const { PublicKey } = require("@solana/web3.js");
+
 const {
   DECIMALS,
   autoBuy,
@@ -17,7 +16,6 @@ const {
   resourceAddresses,
   scoreProgramId,
   keypair,
-  resourceAvailability,
   traderProgramId,
   traderOwnerId,
   nftInformation,
@@ -120,8 +118,12 @@ const getResupplyInstruction = async (resource, shipInfo, fleet) => {
 };
 
 async function sendTransactions(txInstruction) {
-  const tx = new web3.Transaction().add(...txInstruction);
-  return await connection.sendTransaction(tx, [keypair]);
+  try {
+    const tx = new web3.Transaction().add(...txInstruction);
+    return await connection.sendTransaction(tx, [keypair]);
+  } catch (e) {
+    Write.printError(e);
+  }
 }
 
 const getResourcesLeft = (
@@ -156,7 +158,7 @@ function calculatePercentLeft(
 }
 
 let runningProcess;
-const gmClientService = new GmClientService();
+const gmClientService = new atlas.GmClientService();
 
 async function claimAtlas() {
   const txInstructions = [];
@@ -180,21 +182,26 @@ async function claimAtlas() {
   return Promise.resolve(false);
 }
 
-const sendMarketOrder = async ({ order, quantity }) =>
-  await connection.sendTransaction(
-    new web3.Transaction().add(
-      (
-        await gmClientService.getCreateExchangeTransaction(
-          connection,
-          order,
-          userPublicKey,
-          quantity,
-          traderProgramId
-        )
-      ).transaction
-    ),
-    [keypair]
-  );
+const sendMarketOrder = async ({ order, quantity }) => {
+  try {
+    await connection.sendTransaction(
+      new web3.Transaction().add(
+        (
+          await gmClientService.getCreateExchangeTransaction(
+            connection,
+            order,
+            userPublicKey,
+            quantity,
+            traderProgramId
+          )
+        ).transaction
+      ),
+      [keypair]
+    );
+  } catch (e) {
+    Write.printError(e);
+  }
+};
 
 const orderResources = async (nftInformation) => {
   const orders = await gmClientService.getOpenOrdersForPlayer(
@@ -246,7 +253,7 @@ const haveEnoughResources = ({ fleet, shipInfo }, nowSec) => {
     const max = shipInfo[`${resource}MaxReserve`] * shipAmount;
     const current = left * shipAmount;
     const needed = max - current;
-    if (resourceAvailability[resource] < needed) {
+    if (inventory[resource] < needed) {
       enoughResources = false;
     }
   }
@@ -370,44 +377,10 @@ const refreshInventory = async () => {
   return inventory;
 };
 
-const printLogo = async () =>
-  Write.printLine([
-    { text: "\n", color: Write.colors.fgYellow },
-    {
-      text: " ###  ### ##### ### ##   ## ####    ###  #   #\n",
-      color: Write.colors.fgYellow,
-    },
-    {
-      text: "  #    #  #      #  ### ### #   #  #   # #   #\n",
-      color: Write.colors.fgYellow,
-    },
-    {
-      text: "  ######  #####  #  #  #  # #    # ##### #   #\n",
-      color: Write.colors.fgYellow,
-    },
-    {
-      text: "  #    #  #      #  #     # #   #  #   # #   #\n",
-      color: Write.colors.fgYellow,
-    },
-    {
-      text: " ###  ### ##### ### #     # ####   #   # ### ###\n",
-      color: Write.colors.fgYellow,
-    },
-    {
-      text: "                - INDUSTRIES -\n",
-      color: Write.colors.fgYellow,
-    },
-    { text: "                   presents\n", color: Write.colors.fgYellow },
-    {
-      text: "            STAR ATLAS AUTOMATION\n\n",
-      color: Write.colors.fgYellow,
-    },
-    { text: "Options: (b)uy, (c)laim, (q)uit", color: Write.colors.fgRed },
-  ]);
-
-async function start() {
-  console.clear();
-  await printLogo();
+async function start(isFirst = false) {
+  if (isFirst) {
+    Write.printLogo();
+  }
 
   perDay = {
     fuel: [],
@@ -417,10 +390,10 @@ async function start() {
   };
 
   nowSec = new Date().getTime() / 1000;
+  Write.printLine([
+    { text: " Fetching latest flight data...", color: Write.colors.fgYellow },
+  ]);
   if (!nftInformation.length) {
-    Write.printLine([
-      { text: " Fetching latest flight data...", color: Write.colors.fgYellow },
-    ]);
     nftInformation.push(...(await getNftInformation()));
     nftShipInformation.push(
       ...nftInformation.filter((nft) => nft.attributes.itemType === "ship")
@@ -452,14 +425,30 @@ async function start() {
   Write.printAvailableSupply(inventory);
 
   const transactionFleet = [];
+  if (!!activeFleets.length) {
+    Write.printLine({
+      text: ` ${"-".repeat(27)} STAKING ${"-".repeat(27)}`,
+    });
+    activeFleets.sort((a, b) =>
+      nftInformation.find((nft) => nft.mint === a.shipMint.toString())?.name <
+      nftInformation.find((nft) => nft.mint === b.shipMint.toString())?.name
+        ? -1
+        : 1
+    );
+  } else {
+    Write.printLine({
+      text: ` ${"-".repeat(63)}`,
+    });
+  }
   for (const fleet of activeFleets) {
     let needTransaction = false;
 
     const nft = nftInformation.find(
       (nft) => nft.mint === fleet.shipMint.toString()
     );
+    const name = ` | ${nft.name} (${fleet.shipQuantityInEscrow})`;
     Write.printLine({
-      text: ` | ${nft.name} (${fleet.shipQuantityInEscrow}) |`,
+      text: `${name}${" ".repeat(65 - name.length - 1)}|`,
     });
     const shipInfo = await atlas.getScoreVarsShipInfo(
       connection,
@@ -475,7 +464,7 @@ async function start() {
       nowSec
     );
 
-    Write.printPercent(healthPercent, "HEALTH");
+    Write.printPercent(healthPercent > 0 ? healthPercent : 0 , "HEALTH");
     if (healthPercent <= triggerPercentage) needTransaction = true;
 
     const fuelPercent = calculatePercentLeft(
@@ -486,7 +475,7 @@ async function start() {
       nowSec
     );
 
-    Write.printPercent(fuelPercent, "FUEL");
+    Write.printPercent(fuelPercent > 0 ? fuelPercent : 0, "FUEL");
     if (fuelPercent <= triggerPercentage) needTransaction = true;
 
     const foodPercent = calculatePercentLeft(
@@ -497,7 +486,7 @@ async function start() {
       nowSec
     );
 
-    Write.printPercent(foodPercent, "FOOD");
+    Write.printPercent(foodPercent > 0 ? foodPercent : 0, "FOOD");
     if (foodPercent <= triggerPercentage) needTransaction = true;
 
     const armsPercent = calculatePercentLeft(
@@ -508,7 +497,7 @@ async function start() {
       nowSec
     );
 
-    Write.printPercent(armsPercent, "ARMS");
+    Write.printPercent(armsPercent > 0 ? armsPercent : 0, "ARMS");
     if (armsPercent <= triggerPercentage) {
       needTransaction = true;
     }
@@ -535,7 +524,7 @@ async function start() {
     perDay.toolkit.push(calculateDailyUsage(millisecondsToBurnOneToolkit));
 
     Write.printLine({
-      text: ` ------------------------`,
+      text: ` ${"-".repeat(63)}`,
     });
   }
 
@@ -580,11 +569,7 @@ async function start() {
         });
       }
     }
-  } else {
-    Write.printLine({ text: " No resupply needed." });
   }
-
-  Write.printCheckTime();
 
   intervalTime =
     args.interval && args.interval > minimumIntervalTime
@@ -593,13 +578,10 @@ async function start() {
         : maximumIntervalTime
       : minimumIntervalTime;
 
-  Write.printLine({
-    text: " Repeating process every " + intervalTime / 60000 + " minute(s).\n",
-    color: Write.colors.fgYellow,
-  });
+  Write.printRefreshInformation(intervalTime);
 }
 
-const exitProcess = () => {
+const exitProcess = async () => {
   Write.printLine({
     text: "\n Button 'q' pressed",
     color: Write.colors.fgYellow,
@@ -613,7 +595,9 @@ const exitProcess = () => {
 };
 
 readlineModule.emitKeypressEvents(process.stdin);
-process.stdin.setRawMode(true);
+if (process.stdin.isTTY) {
+  process.stdin.setRawMode(true);
+}
 process.stdin.on("keypress", (character) => {
   if (character?.toString() === "q") {
     return exitProcess();
@@ -650,12 +634,12 @@ process.stdin.on("keypress", (character) => {
     });
   }
   if (character?.toString() === "i") {
-    return Write.printAvailableSupply(resourceAvailability);
+    return Write.printAvailableSupply(inventory, true);
   }
   return false;
 });
 
-const startInterval = () => {
+const startInterval = async () => {
   if (args.noRunningProcess !== "true") {
     clearInterval(runningProcess);
     runningProcess = setInterval(start, intervalTime);
@@ -664,6 +648,6 @@ const startInterval = () => {
   }
 };
 
-start()
+start(true)
   .then(startInterval)
   .catch((err) => console.error(err));

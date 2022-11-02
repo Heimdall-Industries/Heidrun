@@ -6,6 +6,7 @@
     "@solana/web3.js": "1.62.1",
     "@staratlas/factory": "0.3.4",
     "bs58": "5.0.0",
+    "esbuild": "^0.15.10",
     "minimist": "1.2.6",
     "node-fetch": "2.6.7",
     "prettier": "2.7.1"
@@ -14,7 +15,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "source": "node start.js",
+    "heidrun": "node heidrun.js",
+    "bundle": "esbuild start.js --bundle  --platform=node --minify --outfile=heidrun.js"
   },
   "author": "",
   "license": "ISC",
