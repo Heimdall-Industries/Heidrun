@@ -227,7 +227,7 @@ const orderResources = async (nftInformation) => {
           ) * orderForDays,
       }).then(async () => {
         Write.printLine({
-          text: "\n  RESOURCE ORDER COMPLETED: " + resource.name,
+          text: " RESOURCE ORDER COMPLETED: " + resource.name,
         });
       });
     })
@@ -556,13 +556,15 @@ async function start(isFirst = false) {
                 Write.printLine({
                   text: " Resources resupplied successfully",
                 });
-                await processAutoBuy(nftAutoBuyInformation).then(async () => {
-                  Write.printLine({
-                    text:
-                      " Auto buy order completed: " +
-                      nftAutoBuyInformation.name,
+                if(!!nftAutoBuyInformation) {
+                  await processAutoBuy(nftAutoBuyInformation).then(async () => {
+                    Write.printLine({
+                      text:
+                          " Auto buy order completed: " +
+                          nftAutoBuyInformation.name,
+                    });
                   });
-                });
+                }
               });
             });
           }
