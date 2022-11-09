@@ -4,7 +4,7 @@
     "@project-serum/borsh": "0.2.5",
     "@solana/spl-token": "0.3.5",
     "@solana/web3.js": "1.62.1",
-    "@staratlas/factory": "0.3.4",
+    "@staratlas/factory": "0.4.4",
     "bs58": "5.0.0",
     "esbuild": "^0.15.10",
     "minimist": "1.2.6",
