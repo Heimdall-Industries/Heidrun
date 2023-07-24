@@ -6,6 +6,7 @@ const args = require("minimist")(process.argv.slice(2));
 
 const Write = require("./lib/write");
 const Web3 = require("./lib/web3");
+const Harvest = require("./lib/harvest");
 
 const {
   DECIMALS,
@@ -24,6 +25,8 @@ const {
   inventory,
   getNftInformation,
 } = Web3;
+
+const harvestConstructions = new Harvest({ connection, keypair });
 
 let nftAutoBuyInformation;
 let activeFleets = [];
@@ -61,7 +64,7 @@ const getResupplyInstruction = async (resource, shipInfo, fleet) => {
             fleet.armsCurrentCapacity,
             shipInfo.millisecondsToBurnOneArms,
             fleet.currentCapacityTimestamp,
-            nowSec
+            nowSec,
           )) *
         fleet.shipQuantityInEscrow;
       break;
@@ -73,7 +76,7 @@ const getResupplyInstruction = async (resource, shipInfo, fleet) => {
             fleet.foodCurrentCapacity,
             shipInfo.millisecondsToBurnOneFood,
             fleet.currentCapacityTimestamp,
-            nowSec
+            nowSec,
           )) *
         fleet.shipQuantityInEscrow;
       break;
@@ -85,7 +88,7 @@ const getResupplyInstruction = async (resource, shipInfo, fleet) => {
             fleet.fuelCurrentCapacity,
             shipInfo.millisecondsToBurnOneFuel,
             fleet.currentCapacityTimestamp,
-            nowSec
+            nowSec,
           )) *
         fleet.shipQuantityInEscrow;
       break;
@@ -97,7 +100,7 @@ const getResupplyInstruction = async (resource, shipInfo, fleet) => {
             fleet.healthCurrentCapacity,
             shipInfo.millisecondsToBurnOneToolkit,
             fleet.currentCapacityTimestamp,
-            nowSec
+            nowSec,
           )) *
         fleet.shipQuantityInEscrow;
       break;
@@ -113,7 +116,7 @@ const getResupplyInstruction = async (resource, shipInfo, fleet) => {
     fleet.shipMint,
     new PublicKey(resource.mint),
     new PublicKey(resource.tokenAccount),
-    scoreProgramId
+    scoreProgramId,
   );
 };
 
@@ -130,7 +133,7 @@ const getResourcesLeft = (
   fleetResourceBurnOutTime,
   shipTimeToBurnOneResource,
   currentCapacityTimestamp,
-  currentTimeSec
+  currentTimeSec,
 ) => {
   const fleetResourceCapacity =
     fleetResourceBurnOutTime / (shipTimeToBurnOneResource / 1000);
@@ -146,13 +149,13 @@ function calculatePercentLeft(
   shipTimeToBurnOneResource,
   currentCapacityTimestamp,
   shipResourceMaxReserve,
-  currentTimeSec
+  currentTimeSec,
 ) {
   const resourcesLeft = getResourcesLeft(
     fleetResourceBurnOutTime,
     shipTimeToBurnOneResource,
     currentCapacityTimestamp,
-    currentTimeSec
+    currentTimeSec,
   );
   return resourcesLeft / (shipResourceMaxReserve / 100);
 }
@@ -170,8 +173,8 @@ async function claimAtlas() {
         userPublicKey,
         new PublicKey(Web3.atlasTokenMint),
         fleet.shipMint,
-        scoreProgramId
-      )
+        scoreProgramId,
+      ),
     );
   }
 
@@ -192,11 +195,11 @@ const sendMarketOrder = async ({ order, quantity }) => {
             order,
             userPublicKey,
             quantity,
-            traderProgramId
+            traderProgramId,
           )
-        ).transaction
+        ).transaction,
       ),
-      [keypair]
+      [keypair],
     );
   } catch (e) {
     Write.printError(e);
@@ -207,7 +210,7 @@ const orderResources = async (nftInformation) => {
   const orders = await gmClientService.getOpenOrdersForPlayer(
     connection,
     new PublicKey(traderOwnerId),
-    traderProgramId
+    traderProgramId,
   );
 
   return await Promise.allSettled(
@@ -223,14 +226,14 @@ const orderResources = async (nftInformation) => {
         quantity:
           perDay[resourceName.toLowerCase()].reduce(
             (partialSum, a) => partialSum + a,
-            0
+            0,
           ) * orderForDays,
       }).then(async () => {
         Write.printLine({
           text: " RESOURCE ORDER COMPLETED: " + resource.name,
         });
       });
-    })
+    }),
   );
 };
 
@@ -247,7 +250,7 @@ const haveEnoughResources = ({ fleet, shipInfo }, nowSec) => {
         }`
       ],
       fleet.currentCapacityTimestamp,
-      nowSec
+      nowSec,
     );
 
     const max = shipInfo[`${resource}MaxReserve`] * shipAmount;
@@ -267,12 +270,12 @@ const processAutoBuy = async (shipToAutoBuy) => {
       await gmClientService.getOpenOrdersForAsset(
         connection,
         new PublicKey(autoBuy),
-        traderProgramId
+        traderProgramId,
       )
     )
       .filter(
         (order) =>
-          order.currencyMint === atlasTokenMint && order.orderType === "sell"
+          order.currencyMint === atlasTokenMint && order.orderType === "sell",
       )
       .sort((a, b) => (a.price / DECIMALS < b.price / DECIMALS ? -1 : 1));
     sellOrders.splice(0, 2);
@@ -311,7 +314,7 @@ const refreshStakingFleet = async () => {
   activeFleets = await atlas.getAllFleetsForUserPublicKey(
     connection,
     userPublicKey,
-    scoreProgramId
+    scoreProgramId,
   );
 };
 
@@ -330,7 +333,7 @@ const refreshInventory = async () => {
           color: Write.colors.fgYellow,
         });
         const fleet = activeFleets.find(
-          (fleet) => fleet.shipMint.toString() === ship.mint
+          (fleet) => fleet.shipMint.toString() === ship.mint,
         );
         let tx;
         if (!!fleet) {
@@ -340,7 +343,7 @@ const refreshInventory = async () => {
             ship.amount,
             new PublicKey(ship.mint),
             new PublicKey(ship.tokenAccount),
-            new PublicKey(scoreProgramId)
+            new PublicKey(scoreProgramId),
           );
         } else {
           tx = await atlas.createInitialDepositInstruction(
@@ -349,7 +352,7 @@ const refreshInventory = async () => {
             ship.amount,
             new PublicKey(ship.mint),
             new PublicKey(ship.tokenAccount),
-            new PublicKey(scoreProgramId)
+            new PublicKey(scoreProgramId),
           );
         }
         if (!!tx) {
@@ -395,11 +398,17 @@ async function start(isFirst = false) {
   ]);
   if (!nftInformation.length) {
     nftInformation.push(...(await getNftInformation()));
+    // nftInformation.forEach((nft) => {
+    //   if(nft.attributes.itemType !== "ship" && nft.attributes.itemType !== "resource") {
+    //     console.log('->', nft.attributes.itemType);
+    //     console.log(nft)
+    //   }
+    // })
     nftShipInformation.push(
-      ...nftInformation.filter((nft) => nft.attributes.itemType === "ship")
+      ...nftInformation.filter((nft) => nft.attributes.itemType === "ship"),
     );
     nftResourceInformation.push(
-      ...nftInformation.filter((nft) => nft.attributes.itemType === "resource")
+      ...nftInformation.filter((nft) => nft.attributes.itemType === "resource"),
     );
     nftAutoBuyInformation =
       !!autoBuy && nftShipInformation.find((nft) => nft.mint === autoBuy);
@@ -433,7 +442,7 @@ async function start(isFirst = false) {
       nftInformation.find((nft) => nft.mint === a.shipMint.toString())?.name <
       nftInformation.find((nft) => nft.mint === b.shipMint.toString())?.name
         ? -1
-        : 1
+        : 1,
     );
   } else {
     Write.printLine({
@@ -444,7 +453,7 @@ async function start(isFirst = false) {
     let needTransaction = false;
 
     const nft = nftInformation.find(
-      (nft) => nft.mint === fleet.shipMint.toString()
+      (nft) => nft.mint === fleet.shipMint.toString(),
     );
     const name = ` | ${nft.name} (${fleet.shipQuantityInEscrow})`;
     Write.printLine({
@@ -453,7 +462,7 @@ async function start(isFirst = false) {
     const shipInfo = await atlas.getScoreVarsShipInfo(
       connection,
       scoreProgramId,
-      new web3.PublicKey(nft.mint)
+      new web3.PublicKey(nft.mint),
     );
 
     const healthPercent = calculatePercentLeft(
@@ -461,10 +470,10 @@ async function start(isFirst = false) {
       shipInfo.millisecondsToBurnOneToolkit,
       fleet.currentCapacityTimestamp,
       shipInfo.toolkitMaxReserve,
-      nowSec
+      nowSec,
     );
 
-    Write.printPercent(healthPercent > 0 ? healthPercent : 0 , "HEALTH");
+    Write.printPercent(healthPercent > 0 ? healthPercent : 0, "HEALTH");
     if (healthPercent <= triggerPercentage) needTransaction = true;
 
     const fuelPercent = calculatePercentLeft(
@@ -472,7 +481,7 @@ async function start(isFirst = false) {
       shipInfo.millisecondsToBurnOneFuel,
       fleet.currentCapacityTimestamp,
       shipInfo.fuelMaxReserve,
-      nowSec
+      nowSec,
     );
 
     Write.printPercent(fuelPercent > 0 ? fuelPercent : 0, "FUEL");
@@ -483,7 +492,7 @@ async function start(isFirst = false) {
       shipInfo.millisecondsToBurnOneFood,
       fleet.currentCapacityTimestamp,
       shipInfo.foodMaxReserve,
-      nowSec
+      nowSec,
     );
 
     Write.printPercent(foodPercent > 0 ? foodPercent : 0, "FOOD");
@@ -494,7 +503,7 @@ async function start(isFirst = false) {
       shipInfo.millisecondsToBurnOneArms,
       fleet.currentCapacityTimestamp,
       shipInfo.armsMaxReserve,
-      nowSec
+      nowSec,
     );
 
     Write.printPercent(armsPercent > 0 ? armsPercent : 0, "ARMS");
@@ -522,7 +531,12 @@ async function start(isFirst = false) {
     perDay.food.push(calculateDailyUsage(millisecondsToBurnOneFood));
     perDay.arms.push(calculateDailyUsage(millisecondsToBurnOneArms));
     perDay.toolkit.push(calculateDailyUsage(millisecondsToBurnOneToolkit));
+  }
 
+  const claimStakeInventory = await harvestConstructions.harvestAll();
+  if (claimStakeInventory.length) {
+    Write.printClaimStakesInformation(claimStakeInventory);
+  } else {
     Write.printLine({
       text: ` ${"-".repeat(63)}`,
     });
@@ -536,7 +550,7 @@ async function start(isFirst = false) {
 
       const hasEnoughResources = await haveEnoughResources(
         { fleet, shipInfo },
-        nowSec
+        nowSec,
       );
 
       if (hasEnoughResources) {
@@ -556,12 +570,12 @@ async function start(isFirst = false) {
                 Write.printLine({
                   text: " Resources resupplied successfully",
                 });
-                if(!!nftAutoBuyInformation) {
+                if (!!nftAutoBuyInformation) {
                   await processAutoBuy(nftAutoBuyInformation).then(async () => {
                     Write.printLine({
                       text:
-                          " Auto buy order completed: " +
-                          nftAutoBuyInformation.name,
+                        " Auto buy order completed: " +
+                        nftAutoBuyInformation.name,
                     });
                   });
                 }

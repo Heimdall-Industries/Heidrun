@@ -1,15 +1,17 @@
 {
   "dependencies": {
-    "@project-serum/anchor": "0.25.0",
+    "@project-serum/anchor": "0.26.0",
     "@project-serum/borsh": "0.2.5",
-    "@solana/spl-token": "0.3.5",
-    "@solana/web3.js": "1.62.1",
-    "@staratlas/factory": "0.4.4",
+    "@solana/spl-token": "0.3.8",
+    "@solana/web3.js": "1.78.0",
+    "@staratlas/factory": "0.5.3",
     "bs58": "5.0.0",
-    "esbuild": "^0.15.10",
-    "minimist": "1.2.6",
-    "node-fetch": "2.6.7",
-    "prettier": "2.7.1"
+    "dotenv": "16.0.3",
+    "esbuild": "0.17.16",
+    "lodash": "4.17.21",
+    "minimist": "1.2.8",
+    "node-fetch": "2.6.12",
+    "prettier": "3.0.0"
   },
   "name": "staratlas-bot",
   "version": "1.0.0",
