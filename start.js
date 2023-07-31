@@ -1,12 +1,18 @@
 const web3 = require("@solana/web3.js");
 const atlas = require("@staratlas/factory");
-const { PublicKey } = require("@solana/web3.js");
+const bs58 = require("bs58");
+const {
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+} = require("@solana/web3.js");
 const readlineModule = require("readline");
 const args = require("minimist")(process.argv.slice(2));
 
 const Write = require("./lib/write");
 const Web3 = require("./lib/web3");
 const Harvest = require("./lib/harvest");
+const Score = require("./lib/score");
 
 const {
   DECIMALS,
@@ -19,17 +25,13 @@ const {
   keypair,
   traderProgramId,
   traderOwnerId,
-  nftInformation,
-  nftShipInformation,
-  nftResourceInformation,
   inventory,
-  getNftInformation,
 } = Web3;
 
-const harvestConstructions = new Harvest({ connection, keypair });
+const harvestInstructions = new Harvest({ connection, keypair });
+const scoreInstructions = new Score({ connection, keypair });
 
 let nftAutoBuyInformation;
-let activeFleets = [];
 const triggerPercentage = 1;
 const orderForDays = 30;
 const userPublicKey = keypair.publicKey;
@@ -125,6 +127,7 @@ async function sendTransactions(txInstruction) {
     const tx = new web3.Transaction().add(...txInstruction);
     return await connection.sendTransaction(tx, [keypair]);
   } catch (e) {
+    console.log(e);
     Write.printError(e);
   }
 }
@@ -164,23 +167,36 @@ let runningProcess;
 const gmClientService = new atlas.GmClientService();
 
 async function claimAtlas() {
-  const txInstructions = [];
+  const transaction = new Transaction(); //{ feePayer: keypair.publicKey });
 
-  for (const fleet of activeFleets) {
-    txInstructions.push(
-      await atlas.createHarvestInstruction(
-        connection,
-        userPublicKey,
-        new PublicKey(Web3.atlasTokenMint),
-        fleet.shipMint,
-        scoreProgramId,
-      ),
+  for (const fleet of scoreInstructions.activeFleets) {
+    const harvestInstruction = await atlas.createHarvestInstruction(
+      connection,
+      userPublicKey,
+      new PublicKey(Web3.atlasTokenMint),
+      fleet.shipMint,
+      scoreProgramId,
     );
+    console.log(".---", harvestInstruction);
+    transaction.add(harvestInstruction);
   }
 
-  if (!!txInstructions.length) {
-    return await sendTransactions(txInstructions);
+  transaction.recentBlockhash = (
+    await connection.getLatestBlockhash("finalized")
+  ).blockhash;
+
+  transaction.sign(keypair, keypair);
+
+  const txId = transaction.signatures[0].signature;
+
+  if (!txId) {
+    throw new Error("Could not derive transaction signature");
   }
+
+  const txIdStr = bs58.encode(txId);
+  const wireTransaction = transaction.serialize();
+  await connection.sendRawTransaction(wireTransaction);
+  await scoreInstructions.finalize(txIdStr);
 
   return Promise.resolve(false);
 }
@@ -310,14 +326,6 @@ const refillResources = async ({ fleet, shipInfo }) => {
   return await sendTransactions(txInstructions);
 };
 
-const refreshStakingFleet = async () => {
-  activeFleets = await atlas.getAllFleetsForUserPublicKey(
-    connection,
-    userPublicKey,
-    scoreProgramId,
-  );
-};
-
 const refreshInventory = async () => {
   const inventory = [];
   const accountInfo = await Web3.refreshAccountInfo();
@@ -332,7 +340,7 @@ const refreshInventory = async () => {
           text: "\n Auto staking " + ship.name,
           color: Write.colors.fgYellow,
         });
-        const fleet = activeFleets.find(
+        const fleet = scoreInstructions.activeFleets.find(
           (fleet) => fleet.shipMint.toString() === ship.mint,
         );
         let tx;
@@ -383,6 +391,7 @@ const refreshInventory = async () => {
 async function start(isFirst = false) {
   if (isFirst) {
     Write.printLogo();
+    await scoreInstructions.getStarAtlasNftInformation();
   }
 
   perDay = {
@@ -396,25 +405,11 @@ async function start(isFirst = false) {
   Write.printLine([
     { text: " Fetching latest flight data...", color: Write.colors.fgYellow },
   ]);
-  if (!nftInformation.length) {
-    nftInformation.push(...(await getNftInformation()));
-    // nftInformation.forEach((nft) => {
-    //   if(nft.attributes.itemType !== "ship" && nft.attributes.itemType !== "resource") {
-    //     console.log('->', nft.attributes.itemType);
-    //     console.log(nft)
-    //   }
-    // })
-    nftShipInformation.push(
-      ...nftInformation.filter((nft) => nft.attributes.itemType === "ship"),
-    );
-    nftResourceInformation.push(
-      ...nftInformation.filter((nft) => nft.attributes.itemType === "resource"),
-    );
-    nftAutoBuyInformation =
-      !!autoBuy && nftShipInformation.find((nft) => nft.mint === autoBuy);
-  }
 
   if (!!autoBuy) {
+    nftAutoBuyInformation = scoreInstructions.nftInformation.ships?.find(
+      (nft) => nft.mint === autoBuy,
+    );
     if (!!nftAutoBuyInformation) {
       Write.printLine({
         text: ` Auto buy enabled for ${nftAutoBuyInformation.name}.`,
@@ -429,18 +424,23 @@ async function start(isFirst = false) {
   }
 
   inventory.length = 0;
-  await refreshStakingFleet();
+  await scoreInstructions.refreshStakingFleet();
+  await scoreInstructions.refreshInventory();
   inventory.push(...(await refreshInventory()));
   Write.printAvailableSupply(inventory);
 
   const transactionFleet = [];
-  if (!!activeFleets.length) {
+  if (!!scoreInstructions.activeFleets.length) {
     Write.printLine({
       text: ` ${"-".repeat(27)} STAKING ${"-".repeat(27)}`,
     });
-    activeFleets.sort((a, b) =>
-      nftInformation.find((nft) => nft.mint === a.shipMint.toString())?.name <
-      nftInformation.find((nft) => nft.mint === b.shipMint.toString())?.name
+    scoreInstructions.activeFleets.sort((a, b) =>
+      scoreInstructions.nftInformation.all.find(
+        (nft) => nft.mint === a.shipMint.toString(),
+      )?.name <
+      scoreInstructions.nftInformation.all.find(
+        (nft) => nft.mint === b.shipMint.toString(),
+      )?.name
         ? -1
         : 1,
     );
@@ -449,10 +449,10 @@ async function start(isFirst = false) {
       text: ` ${"-".repeat(63)}`,
     });
   }
-  for (const fleet of activeFleets) {
+  for (const fleet of scoreInstructions.activeFleets) {
     let needTransaction = false;
 
-    const nft = nftInformation.find(
+    const nft = scoreInstructions.nftInformation.all.find(
       (nft) => nft.mint === fleet.shipMint.toString(),
     );
     const name = ` | ${nft.name} (${fleet.shipQuantityInEscrow})`;
@@ -533,7 +533,7 @@ async function start(isFirst = false) {
     perDay.toolkit.push(calculateDailyUsage(millisecondsToBurnOneToolkit));
   }
 
-  const claimStakeInventory = await harvestConstructions.harvestAll();
+  const claimStakeInventory = await harvestInstructions.harvestAll();
   if (claimStakeInventory.length) {
     Write.printClaimStakesInformation(claimStakeInventory);
   } else {
@@ -564,28 +564,57 @@ async function start(isFirst = false) {
             Write.printLine({
               text: " ATLAS claimed successfully, buying resources",
             });
-            await orderResources(nftInformation).then(async () => {
-              Write.printLine({ text: " Resources bought, resupplying" });
-              await refillResources({ shipInfo, fleet }).then(async () => {
-                Write.printLine({
-                  text: " Resources resupplied successfully",
-                });
-                if (!!nftAutoBuyInformation) {
-                  await processAutoBuy(nftAutoBuyInformation).then(async () => {
-                    Write.printLine({
-                      text:
-                        " Auto buy order completed: " +
-                        nftAutoBuyInformation.name,
-                    });
+            await orderResources(scoreInstructions.nftInformation.all).then(
+              async () => {
+                Write.printLine({ text: " Resources bought, resupplying" });
+                await refillResources({ shipInfo, fleet }).then(async () => {
+                  Write.printLine({
+                    text: " Resources resupplied successfully",
                   });
-                }
-              });
-            });
+                  if (!!nftAutoBuyInformation) {
+                    await processAutoBuy(nftAutoBuyInformation).then(
+                      async () => {
+                        Write.printLine({
+                          text:
+                            " Auto buy order completed: " +
+                            nftAutoBuyInformation.name,
+                        });
+                      },
+                    );
+                  }
+                });
+              },
+            );
           }
         });
       }
     }
   }
+
+  console.log(
+    "Fuel",
+    perDay.fuel.reduce((a, b) => {
+      return a + b;
+    }, 10),
+  );
+  console.log(
+    "Food",
+    perDay.food.reduce((a, b) => {
+      return a + b;
+    }, 10),
+  );
+  console.log(
+    "ARMS",
+    perDay.arms.reduce((a, b) => {
+      return a + b;
+    }, 10),
+  );
+  console.log(
+    "Health",
+    perDay.toolkit.reduce((a, b) => {
+      return a + b;
+    }, 10),
+  );
 
   intervalTime =
     args.interval && args.interval > minimumIntervalTime
