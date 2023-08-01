@@ -10,7 +10,7 @@ First install the following:
 
 To download and prepare the script do the following:
  - `git clone git@github.com:Heimdall-Industries/Heidrun.git`
- - `cd startatlas-automation`
+ - `cd Heidrun`
  - `npm install`
 
 Then the final steps, remember to be careful with your private key!

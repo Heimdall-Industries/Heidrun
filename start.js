@@ -1,539 +1,45 @@
-const web3 = require("@solana/web3.js");
-const atlas = require("@staratlas/factory");
-const { PublicKey } = require("@solana/web3.js");
 const readlineModule = require("readline");
 const args = require("minimist")(process.argv.slice(2));
 
 const Write = require("./lib/write");
 const Web3 = require("./lib/web3");
 const Harvest = require("./lib/harvest");
+const Score = require("./lib/score");
 
-const {
-  DECIMALS,
-  autoBuy,
-  autoStake,
-  atlasTokenMint,
-  connection,
-  resourceAddresses,
-  scoreProgramId,
-  keypair,
-  traderProgramId,
-  traderOwnerId,
-  nftInformation,
-  nftShipInformation,
-  nftResourceInformation,
-  inventory,
-  getNftInformation,
-} = Web3;
+const { connection, keypair } = Web3;
 
-const harvestConstructions = new Harvest({ connection, keypair });
-
-let nftAutoBuyInformation;
-let activeFleets = [];
-const triggerPercentage = 1;
-const orderForDays = 30;
-const userPublicKey = keypair.publicKey;
-const millisecondsInDay = 86100000;
+const harvestInstructions = new Harvest({ connection, keypair });
+const scoreInstructions = new Score({ connection, keypair });
 const minimumIntervalTime = 600000;
 const maximumIntervalTime = 6000000;
 let intervalTime = 0;
 let nowSec;
-let perDay = {
-  fuel: [],
-  food: [],
-  arms: [],
-  toolkit: [],
-};
-
-const getResupplyInstruction = async (resource, shipInfo, fleet) => {
-  const {
-    createRefeedInstruction,
-    createRearmInstruction,
-    createRefuelInstruction,
-    createRepairInstruction,
-  } = atlas;
-  let quantity;
-  let createInstruction;
-
-  switch (resource.name) {
-    case "Ammunition":
-      createInstruction = createRearmInstruction;
-      quantity =
-        (shipInfo.armsMaxReserve -
-          getResourcesLeft(
-            fleet.armsCurrentCapacity,
-            shipInfo.millisecondsToBurnOneArms,
-            fleet.currentCapacityTimestamp,
-            nowSec,
-          )) *
-        fleet.shipQuantityInEscrow;
-      break;
-    case "Food":
-      createInstruction = createRefeedInstruction;
-      quantity =
-        (shipInfo.foodMaxReserve -
-          getResourcesLeft(
-            fleet.foodCurrentCapacity,
-            shipInfo.millisecondsToBurnOneFood,
-            fleet.currentCapacityTimestamp,
-            nowSec,
-          )) *
-        fleet.shipQuantityInEscrow;
-      break;
-    case "Fuel":
-      createInstruction = createRefuelInstruction;
-      quantity =
-        (shipInfo.fuelMaxReserve -
-          getResourcesLeft(
-            fleet.fuelCurrentCapacity,
-            shipInfo.millisecondsToBurnOneFuel,
-            fleet.currentCapacityTimestamp,
-            nowSec,
-          )) *
-        fleet.shipQuantityInEscrow;
-      break;
-    case "Toolkit":
-      createInstruction = createRepairInstruction;
-      quantity =
-        (shipInfo.toolkitMaxReserve -
-          getResourcesLeft(
-            fleet.healthCurrentCapacity,
-            shipInfo.millisecondsToBurnOneToolkit,
-            fleet.currentCapacityTimestamp,
-            nowSec,
-          )) *
-        fleet.shipQuantityInEscrow;
-      break;
-    default:
-      return false;
-  }
-
-  return await createInstruction(
-    connection,
-    userPublicKey,
-    userPublicKey,
-    quantity,
-    fleet.shipMint,
-    new PublicKey(resource.mint),
-    new PublicKey(resource.tokenAccount),
-    scoreProgramId,
-  );
-};
-
-async function sendTransactions(txInstruction) {
-  try {
-    const tx = new web3.Transaction().add(...txInstruction);
-    return await connection.sendTransaction(tx, [keypair]);
-  } catch (e) {
-    Write.printError(e);
-  }
-}
-
-const getResourcesLeft = (
-  fleetResourceBurnOutTime,
-  shipTimeToBurnOneResource,
-  currentCapacityTimestamp,
-  currentTimeSec,
-) => {
-  const fleetResourceCapacity =
-    fleetResourceBurnOutTime / (shipTimeToBurnOneResource / 1000);
-  return (
-    fleetResourceCapacity -
-    (currentTimeSec - currentCapacityTimestamp) /
-      (shipTimeToBurnOneResource / 1000)
-  );
-};
-
-function calculatePercentLeft(
-  fleetResourceBurnOutTime,
-  shipTimeToBurnOneResource,
-  currentCapacityTimestamp,
-  shipResourceMaxReserve,
-  currentTimeSec,
-) {
-  const resourcesLeft = getResourcesLeft(
-    fleetResourceBurnOutTime,
-    shipTimeToBurnOneResource,
-    currentCapacityTimestamp,
-    currentTimeSec,
-  );
-  return resourcesLeft / (shipResourceMaxReserve / 100);
-}
 
 let runningProcess;
-const gmClientService = new atlas.GmClientService();
-
-async function claimAtlas() {
-  const txInstructions = [];
-
-  for (const fleet of activeFleets) {
-    txInstructions.push(
-      await atlas.createHarvestInstruction(
-        connection,
-        userPublicKey,
-        new PublicKey(Web3.atlasTokenMint),
-        fleet.shipMint,
-        scoreProgramId,
-      ),
-    );
-  }
-
-  if (!!txInstructions.length) {
-    return await sendTransactions(txInstructions);
-  }
-
-  return Promise.resolve(false);
-}
-
-const sendMarketOrder = async ({ order, quantity }) => {
-  try {
-    await connection.sendTransaction(
-      new web3.Transaction().add(
-        (
-          await gmClientService.getCreateExchangeTransaction(
-            connection,
-            order,
-            userPublicKey,
-            quantity,
-            traderProgramId,
-          )
-        ).transaction,
-      ),
-      [keypair],
-    );
-  } catch (e) {
-    Write.printError(e);
-  }
-};
-
-const orderResources = async (nftInformation) => {
-  const orders = await gmClientService.getOpenOrdersForPlayer(
-    connection,
-    new PublicKey(traderOwnerId),
-    traderProgramId,
-  );
-
-  return await Promise.allSettled(
-    orders.map(async (order) => {
-      const resource = nftInformation.find((nft) => {
-        return nft.mint === order.orderMint;
-      });
-      const resourceName =
-        resource.name === "Ammunition" ? "Arms" : resource.name;
-
-      await sendMarketOrder({
-        order,
-        quantity:
-          perDay[resourceName.toLowerCase()].reduce(
-            (partialSum, a) => partialSum + a,
-            0,
-          ) * orderForDays,
-      }).then(async () => {
-        Write.printLine({
-          text: " RESOURCE ORDER COMPLETED: " + resource.name,
-        });
-      });
-    }),
-  );
-};
-
-const haveEnoughResources = ({ fleet, shipInfo }, nowSec) => {
-  let enoughResources = true;
-  for (const resource of Object.keys(resourceAddresses)) {
-    const shipAmount = fleet.shipQuantityInEscrow;
-    const fleetResource = resource === "toolkit" ? "health" : resource;
-    const left = getResourcesLeft(
-      fleet[`${fleetResource}CurrentCapacity`],
-      shipInfo[
-        `millisecondsToBurnOne${
-          resource.charAt(0).toUpperCase() + resource.slice(1)
-        }`
-      ],
-      fleet.currentCapacityTimestamp,
-      nowSec,
-    );
-
-    const max = shipInfo[`${resource}MaxReserve`] * shipAmount;
-    const current = left * shipAmount;
-    const needed = max - current;
-    if (inventory[resource] < needed) {
-      enoughResources = false;
-    }
-  }
-
-  return Promise.resolve(enoughResources);
-};
-
-const processAutoBuy = async (shipToAutoBuy) => {
-  if (!!shipToAutoBuy) {
-    const sellOrders = (
-      await gmClientService.getOpenOrdersForAsset(
-        connection,
-        new PublicKey(autoBuy),
-        traderProgramId,
-      )
-    )
-      .filter(
-        (order) =>
-          order.currencyMint === atlasTokenMint && order.orderType === "sell",
-      )
-      .sort((a, b) => (a.price / DECIMALS < b.price / DECIMALS ? -1 : 1));
-    sellOrders.splice(0, 2);
-    const [sellOrder] = sellOrders;
-
-    const atlas = inventory.find((item) => item.mint === atlasTokenMint);
-    const price =
-      sellOrder.price / Number("1".padEnd(sellOrder.currencyDecimals + 1, "0"));
-
-    if (atlas.amount > price) {
-      const quantity = Math.floor(atlas.amount / price);
-      return await sendMarketOrder({
-        order: sellOrder,
-        quantity:
-          quantity > sellOrder.orderQtyRemaining
-            ? sellOrder.orderQtyRemaining
-            : quantity,
-      });
-    }
-  }
-};
-
-const refillResources = async ({ fleet, shipInfo }) => {
-  const txInstructions = [];
-
-  const resources = inventory.filter((item) => item.type === "resource");
-  for (const resource of resources) {
-    const instruction = await getResupplyInstruction(resource, shipInfo, fleet);
-    txInstructions.push(instruction);
-  }
-
-  return await sendTransactions(txInstructions);
-};
-
-const refreshStakingFleet = async () => {
-  activeFleets = await atlas.getAllFleetsForUserPublicKey(
-    connection,
-    userPublicKey,
-    scoreProgramId,
-  );
-};
-
-const refreshInventory = async () => {
-  const inventory = [];
-  const accountInfo = await Web3.refreshAccountInfo();
-
-  if (autoStake) {
-    const ships = accountInfo.filter((value) => value.type === "ship");
-    const others = accountInfo.filter((value) => value.type !== "ship");
-
-    if (!!ships.length) {
-      for (const ship of ships) {
-        Write.printLine({
-          text: "\n Auto staking " + ship.name,
-          color: Write.colors.fgYellow,
-        });
-        const fleet = activeFleets.find(
-          (fleet) => fleet.shipMint.toString() === ship.mint,
-        );
-        let tx;
-        if (!!fleet) {
-          tx = await atlas.createPartialDepositInstruction(
-            connection,
-            userPublicKey,
-            ship.amount,
-            new PublicKey(ship.mint),
-            new PublicKey(ship.tokenAccount),
-            new PublicKey(scoreProgramId),
-          );
-        } else {
-          tx = await atlas.createInitialDepositInstruction(
-            connection,
-            userPublicKey,
-            ship.amount,
-            new PublicKey(ship.mint),
-            new PublicKey(ship.tokenAccount),
-            new PublicKey(scoreProgramId),
-          );
-        }
-        if (!!tx) {
-          await sendTransactions([tx]).then(async () => {
-            Write.printLine([
-              {
-                text:
-                  "\n " +
-                  ship.name +
-                  " is now staking, it will be reflected on refresh.",
-                color: Write.colors.fgYellow,
-              },
-            ]);
-          });
-        }
-      }
-      inventory.push(...others);
-    } else {
-      inventory.push(...ships, ...others);
-    }
-  } else {
-    inventory.push(...accountInfo);
-  }
-
-  return inventory;
-};
 
 async function start(isFirst = false) {
   if (isFirst) {
     Write.printLogo();
+    await scoreInstructions.getStarAtlasNftInformation();
   }
-
-  perDay = {
-    fuel: [],
-    food: [],
-    arms: [],
-    toolkit: [],
-  };
 
   nowSec = new Date().getTime() / 1000;
   Write.printLine([
     { text: " Fetching latest flight data...", color: Write.colors.fgYellow },
   ]);
-  if (!nftInformation.length) {
-    nftInformation.push(...(await getNftInformation()));
-    // nftInformation.forEach((nft) => {
-    //   if(nft.attributes.itemType !== "ship" && nft.attributes.itemType !== "resource") {
-    //     console.log('->', nft.attributes.itemType);
-    //     console.log(nft)
-    //   }
-    // })
-    nftShipInformation.push(
-      ...nftInformation.filter((nft) => nft.attributes.itemType === "ship"),
-    );
-    nftResourceInformation.push(
-      ...nftInformation.filter((nft) => nft.attributes.itemType === "resource"),
-    );
-    nftAutoBuyInformation =
-      !!autoBuy && nftShipInformation.find((nft) => nft.mint === autoBuy);
-  }
 
-  if (!!autoBuy) {
-    if (!!nftAutoBuyInformation) {
-      Write.printLine({
-        text: ` Auto buy enabled for ${nftAutoBuyInformation.name}.`,
-        color: Write.colors.fgYellow,
-      });
-    } else {
-      Write.printLine({
-        text: `Auto buy value incorrect.`,
-        color: Write.colors.fgRed,
-      });
-    }
-  }
-
-  inventory.length = 0;
-  await refreshStakingFleet();
-  inventory.push(...(await refreshInventory()));
-  Write.printAvailableSupply(inventory);
-
-  const transactionFleet = [];
-  if (!!activeFleets.length) {
+  if (!!scoreInstructions.autoBuyFleet) {
     Write.printLine({
-      text: ` ${"-".repeat(27)} STAKING ${"-".repeat(27)}`,
-    });
-    activeFleets.sort((a, b) =>
-      nftInformation.find((nft) => nft.mint === a.shipMint.toString())?.name <
-      nftInformation.find((nft) => nft.mint === b.shipMint.toString())?.name
-        ? -1
-        : 1,
-    );
-  } else {
-    Write.printLine({
-      text: ` ${"-".repeat(63)}`,
+      text: ` Auto buy enabled for ${scoreInstructions.autoBuyFleet.name}.`,
+      color: Write.colors.fgYellow,
     });
   }
-  for (const fleet of activeFleets) {
-    let needTransaction = false;
 
-    const nft = nftInformation.find(
-      (nft) => nft.mint === fleet.shipMint.toString(),
-    );
-    const name = ` | ${nft.name} (${fleet.shipQuantityInEscrow})`;
-    Write.printLine({
-      text: `${name}${" ".repeat(65 - name.length - 1)}|`,
-    });
-    const shipInfo = await atlas.getScoreVarsShipInfo(
-      connection,
-      scoreProgramId,
-      new web3.PublicKey(nft.mint),
-    );
-
-    const healthPercent = calculatePercentLeft(
-      fleet.healthCurrentCapacity,
-      shipInfo.millisecondsToBurnOneToolkit,
-      fleet.currentCapacityTimestamp,
-      shipInfo.toolkitMaxReserve,
-      nowSec,
-    );
-
-    Write.printPercent(healthPercent > 0 ? healthPercent : 0, "HEALTH");
-    if (healthPercent <= triggerPercentage) needTransaction = true;
-
-    const fuelPercent = calculatePercentLeft(
-      fleet.fuelCurrentCapacity,
-      shipInfo.millisecondsToBurnOneFuel,
-      fleet.currentCapacityTimestamp,
-      shipInfo.fuelMaxReserve,
-      nowSec,
-    );
-
-    Write.printPercent(fuelPercent > 0 ? fuelPercent : 0, "FUEL");
-    if (fuelPercent <= triggerPercentage) needTransaction = true;
-
-    const foodPercent = calculatePercentLeft(
-      fleet.foodCurrentCapacity,
-      shipInfo.millisecondsToBurnOneFood,
-      fleet.currentCapacityTimestamp,
-      shipInfo.foodMaxReserve,
-      nowSec,
-    );
-
-    Write.printPercent(foodPercent > 0 ? foodPercent : 0, "FOOD");
-    if (foodPercent <= triggerPercentage) needTransaction = true;
-
-    const armsPercent = calculatePercentLeft(
-      fleet.armsCurrentCapacity,
-      shipInfo.millisecondsToBurnOneArms,
-      fleet.currentCapacityTimestamp,
-      shipInfo.armsMaxReserve,
-      nowSec,
-    );
-
-    Write.printPercent(armsPercent > 0 ? armsPercent : 0, "ARMS");
-    if (armsPercent <= triggerPercentage) {
-      needTransaction = true;
-    }
-
-    if (needTransaction) {
-      transactionFleet.push({
-        fleet,
-        shipInfo,
-        nft,
-      });
-    }
-
-    const calculateDailyUsage = (millisecondsForOne) =>
-      (millisecondsInDay / millisecondsForOne) * fleet.shipQuantityInEscrow;
-    const {
-      millisecondsToBurnOneFuel,
-      millisecondsToBurnOneArms,
-      millisecondsToBurnOneFood,
-      millisecondsToBurnOneToolkit,
-    } = shipInfo;
-    perDay.fuel.push(calculateDailyUsage(millisecondsToBurnOneFuel));
-    perDay.food.push(calculateDailyUsage(millisecondsToBurnOneFood));
-    perDay.arms.push(calculateDailyUsage(millisecondsToBurnOneArms));
-    perDay.toolkit.push(calculateDailyUsage(millisecondsToBurnOneToolkit));
-  }
-
-  const claimStakeInventory = await harvestConstructions.harvestAll();
+  await scoreInstructions.refreshStakingFleet();
+  await scoreInstructions.refreshInventory();
+  Write.printAvailableSupply(scoreInstructions.inventory);
+  await scoreInstructions.showFleet();
+  const claimStakeInventory = await harvestInstructions.harvestAll();
   if (claimStakeInventory.length) {
     Write.printClaimStakesInformation(claimStakeInventory);
   } else {
@@ -541,51 +47,11 @@ async function start(isFirst = false) {
       text: ` ${"-".repeat(63)}`,
     });
   }
-
-  if (transactionFleet.length > 0) {
-    for (const { fleet, shipInfo, nft } of transactionFleet) {
-      Write.printLine({
-        text: `\n ### Resupplying ${nft.name} ###`,
-      });
-
-      const hasEnoughResources = await haveEnoughResources(
-        { fleet, shipInfo },
-        nowSec,
-      );
-
-      if (hasEnoughResources) {
-        await refillResources({ shipInfo, fleet }).then(async () => {
-          Write.printLine({ text: "\n  Resources refilled successfully" });
-        });
-      } else {
-        Write.printLine({ text: "\n  Not enough resources, claiming ATLAS" });
-        await claimAtlas().then(async (result) => {
-          if (!!result) {
-            Write.printLine({
-              text: " ATLAS claimed successfully, buying resources",
-            });
-            await orderResources(nftInformation).then(async () => {
-              Write.printLine({ text: " Resources bought, resupplying" });
-              await refillResources({ shipInfo, fleet }).then(async () => {
-                Write.printLine({
-                  text: " Resources resupplied successfully",
-                });
-                if (!!nftAutoBuyInformation) {
-                  await processAutoBuy(nftAutoBuyInformation).then(async () => {
-                    Write.printLine({
-                      text:
-                        " Auto buy order completed: " +
-                        nftAutoBuyInformation.name,
-                    });
-                  });
-                }
-              });
-            });
-          }
-        });
-      }
-    }
-  }
+  await scoreInstructions.refillFleet();
+  Write.printDailyChurn(
+    scoreInstructions.dailyUsage,
+    harvestInstructions.dailyGeneration,
+  );
 
   intervalTime =
     args.interval && args.interval > minimumIntervalTime
@@ -619,17 +85,19 @@ process.stdin.on("keypress", (character) => {
     return exitProcess();
   }
   if (character?.toString() === "b") {
-    if (!!nftAutoBuyInformation) {
+    if (!!scoreInstructions.autoBuyFleet) {
       Write.printLine({
         text: "Starting auto buy process.",
         color: Write.colors.fgYellow,
       });
-      return processAutoBuy(nftAutoBuyInformation).then(() => {
-        Write.printLine({
-          text: "Auto buy process finished.",
-          color: Write.colors.fgYellow,
+      return scoreInstructions
+        .processAutoBuy(scoreInstructions.autoBuyFleet)
+        .then(() => {
+          Write.printLine({
+            text: "Auto buy process finished.",
+            color: Write.colors.fgYellow,
+          });
         });
-      });
     } else {
       Write.printLine({
         text: "Auto buy not enabled.",
@@ -642,7 +110,7 @@ process.stdin.on("keypress", (character) => {
       text: "Starting claim ATLAS process.",
       color: Write.colors.fgYellow,
     });
-    return claimAtlas().then(() => {
+    return scoreInstructions.claimAtlas().then(() => {
       Write.printLine({
         text: "Claim ATLAS process finished.",
         color: Write.colors.fgYellow,
@@ -650,7 +118,7 @@ process.stdin.on("keypress", (character) => {
     });
   }
   if (character?.toString() === "i") {
-    return Write.printAvailableSupply(inventory, true);
+    return Write.printAvailableSupply(scoreInstructions.inventory, true);
   }
   return false;
 });

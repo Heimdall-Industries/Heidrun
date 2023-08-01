@@ -3,7 +3,7 @@
     "@project-serum/anchor": "0.26.0",
     "@project-serum/borsh": "0.2.5",
     "@solana/spl-token": "0.3.8",
-    "@solana/web3.js": "1.78.0",
+    "@solana/web3.js": "1.78.1",
     "@staratlas/factory": "0.5.3",
     "bs58": "5.0.0",
     "dotenv": "16.0.3",
@@ -13,8 +13,8 @@
     "node-fetch": "2.6.12",
     "prettier": "3.0.0"
   },
-  "name": "staratlas-bot",
-  "version": "1.0.0",
+  "name": "heidrun",
+  "version": "0.2.0",
   "main": "index.js",
   "scripts": {
     "source": "node start.js",
