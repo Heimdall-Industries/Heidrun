@@ -9,7 +9,7 @@ const Score = require("./lib/score");
 const { connection, keypair } = Web3;
 
 const harvestInstructions = new Harvest({ connection, keypair });
-const scoreInstructions = new Score({ connection, keypair });
+const scoreInstructions = new Score();
 const minimumIntervalTime = 600000;
 const maximumIntervalTime = 6000000;
 let intervalTime = 0;
