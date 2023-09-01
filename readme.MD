@@ -25,9 +25,9 @@ The following arguments can be added to your own `.env`:
 
  - AUTO_BUY: place the ship mint address here to automatically buy this ship after the full claim Atlas, buy resources, resupply fleet.
  - AUTO_STAKE: `true` or `false` to automatically stake ships found in your inventory.
- - DISCORD_WEBHOOK: You can set up your own webhook to get refill and auto-stake reports, just copy-paste the unique code that comes after `https://discordapp.com/api/webhooks/`.
- - CUSTOM_RPC: The address of your personal rpc server.
- - DONATION_OPT_OUT: `true` or `false` to opt out of donating 0.1% of transactions to the developers of this script.
+- CUSTOM_RPC: The address of your personal rpc server.
+- DISCORD_WEBHOOK: You can set up your own webhook to get refill and auto-stake reports, just copy-paste the unique code that comes after `https://discordapp.com/api/webhooks/`.
+ - DONATION_OPT_OUT: `true` or `false` to opt out of donating 2% of claim Atlas transactions to the developers of this script.
 
 ## Optional arguments:
 
@@ -41,4 +41,4 @@ The following arguments can be added to your own `.env`:
 
 ## Special thanks:
 
-I would like to thank Lu and Xcode on the Star Atlas discord server for sharing their knowledge!
+I would like to thank [Lu](https://github.com/mindrunner) and Xcode on the Star Atlas discord server for sharing their knowledge!

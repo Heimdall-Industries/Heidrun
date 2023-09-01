@@ -21,19 +21,18 @@ async function start(isFirst = false) {
   if (isFirst) {
     Write.printLogo();
     await scoreInstructions.getStarAtlasNftInformation();
-  }
 
+    if (!!scoreInstructions.autoBuyFleet) {
+      Write.printLine({
+        text: ` Auto buy enabled for ${scoreInstructions.autoBuyFleet.name}.`,
+        color: Write.colors.fgYellow,
+      });
+    }
+  }
   nowSec = new Date().getTime() / 1000;
   Write.printLine([
     { text: " Fetching latest flight data...", color: Write.colors.fgYellow },
   ]);
-
-  if (!!scoreInstructions.autoBuyFleet) {
-    Write.printLine({
-      text: ` Auto buy enabled for ${scoreInstructions.autoBuyFleet.name}.`,
-      color: Write.colors.fgYellow,
-    });
-  }
 
   await scoreInstructions.refreshStakingFleet();
   await scoreInstructions.refreshInventory();
@@ -52,6 +51,8 @@ async function start(isFirst = false) {
     scoreInstructions.dailyUsage,
     harvestInstructions.dailyGeneration,
   );
+
+  await scoreInstructions.processAutoBuy(scoreInstructions.autoBuyFleet);
 
   intervalTime =
     args.interval && args.interval > minimumIntervalTime
