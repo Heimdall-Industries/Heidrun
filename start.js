@@ -27,7 +27,7 @@ const {
 
 let nftAutoBuyInformation;
 let activeFleets = [];
-const triggerPercentage = 1;
+const triggerPercentage = 10;
 const orderForDays = 30;
 const userPublicKey = keypair.publicKey;
 const millisecondsInDay = 86100000;
