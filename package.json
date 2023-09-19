@@ -18,7 +18,7 @@
   "version": "0.2.0",
   "main": "index.js",
   "scripts": {
-    "source": "node start.js",
+    "start": "node -r dotenv/config start.js",
     "heidrun": "node heidrun.js",
     "bundle": "esbuild start.js --bundle  --platform=node --minify --outfile=heidrun.js"
   },
