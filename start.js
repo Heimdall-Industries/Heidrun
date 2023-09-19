@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const readlineModule = require("readline");
 const args = require("minimist")(process.argv.slice(2));
 
@@ -16,6 +18,7 @@ let intervalTime = 0;
 let nowSec;
 
 let runningProcess;
+let autoClaimProcess;
 
 async function start(isFirst = false) {
   if (isFirst) {
@@ -74,6 +77,7 @@ const exitProcess = async () => {
     color: Write.colors.fgYellow,
   });
   clearInterval(runningProcess);
+  clearInterval(autoClaimProcess);
   process.exit(0);
 };
 
@@ -134,5 +138,20 @@ const startInterval = async () => {
 };
 
 start(true)
-  .then(startInterval)
+  .then(() => {
+    startInterval();
+
+    if (process.env.AUTO_CLAIM) {
+      clearInterval(autoClaimProcess);
+      autoClaimProcess = setInterval(
+        () => {
+          scoreInstructions.claimAtlas(true).then(() => {
+            clearInterval(runningProcess);
+            runningProcess = setInterval(start, intervalTime);
+          });
+        },
+        Number(process.env.AUTO_CLAIM) * 60000,
+      );
+    }
+  })
   .catch((err) => console.error(err));
