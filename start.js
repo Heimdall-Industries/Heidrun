@@ -23,7 +23,11 @@ let autoClaimProcess;
 async function start(isFirst = false) {
   if (isFirst) {
     Write.printLogo();
-    await scoreInstructions.getStarAtlasNftInformation();
+    try {
+      await scoreInstructions.getStarAtlasNftInformation();
+    } catch (err) {
+      console.error(err);
+    }
 
     if (!!scoreInstructions.autoBuyFleet) {
       Write.printLine({
@@ -37,19 +41,45 @@ async function start(isFirst = false) {
     { text: " Fetching latest flight data...", color: Write.colors.fgYellow },
   ]);
 
-  await scoreInstructions.refreshStakingFleet();
-  await scoreInstructions.refreshInventory();
-  Write.printAvailableSupply(scoreInstructions.inventory);
-  await scoreInstructions.showFleet();
-  const claimStakeInventory = await harvestInstructions.harvestAll();
-  if (claimStakeInventory.length) {
-    Write.printClaimStakesInformation(claimStakeInventory);
-  } else {
-    Write.printLine({
-      text: ` ${"-".repeat(63)}`,
-    });
+  try {
+    await scoreInstructions.refreshStakingFleet();
+  } catch (err) {
+    console.error(err);
   }
-  await scoreInstructions.refillFleet();
+
+  try {
+    await scoreInstructions.refreshInventory();
+  } catch (err) {
+    console.error(err);
+  }
+
+  Write.printAvailableSupply(scoreInstructions.inventory);
+
+  try {
+    await scoreInstructions.showFleet();
+  } catch (err) {
+    console.error(err);
+  }
+
+  try {
+    const claimStakeInventory = await harvestInstructions.harvestAll();
+    if (claimStakeInventory.length) {
+      Write.printClaimStakesInformation(claimStakeInventory);
+    } else {
+      Write.printLine({
+        text: ` ${"-".repeat(63)}`,
+      });
+    }
+  } catch (err) {
+    console.error(err);
+  }
+
+  try {
+    await scoreInstructions.refillFleet();
+  } catch (err) {
+    console.error(err);
+  }
+
   Write.printDailyChurn(
     scoreInstructions.dailyUsage,
     harvestInstructions.dailyGeneration,
@@ -144,11 +174,10 @@ start(true)
     if (process.env.AUTO_CLAIM) {
       clearInterval(autoClaimProcess);
       autoClaimProcess = setInterval(
-        () => {
-          scoreInstructions.claimAtlas(true).then(() => {
-            clearInterval(runningProcess);
-            runningProcess = setInterval(start, intervalTime);
-          });
+        async () => {
+          clearInterval(runningProcess);
+          await scoreInstructions.claimAtlas(true);
+          runningProcess = setInterval(start, intervalTime);
         },
         Number(process.env.AUTO_CLAIM) * 60000,
       );

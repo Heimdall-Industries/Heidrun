@@ -3,7 +3,7 @@
     "@project-serum/anchor": "0.26.0",
     "@project-serum/borsh": "0.2.5",
     "@solana/spl-token": "0.3.8",
-    "@solana/web3.js": "1.78.4",
+    "@solana/web3.js": "1.78.5",
     "@staratlas/factory": "0.6.0",
     "bs58": "5.0.0",
     "discord-webhook-node": "1.1.8",
